@@ -7,6 +7,114 @@ import { DEFAULT_CONFIG, YTDLP_OPTIONS, YTDLP_AUDIO_OPTIONS, YTDLP_YOUTUBE_HEADE
 import { isYouTubeUrl } from './validator.js';
 import { logError, logSuccess, logInfo, logProgress, logWarning } from './logger.js';
 
+async function getExpectedFilename(url, options) {
+  const { audioOnly, format, quality, outputPath, browser = null } = options;
+  
+  return new Promise((resolve, reject) => {
+    const ytdlpPath = path.join(process.cwd(), 'node_modules/youtube-dl-exec/bin/yt-dlp');
+    
+    const args = [
+      '--get-filename',
+      '--output', path.join(outputPath, `%(title).${UI_CONSTANTS.TITLE_MAX_LENGTH}s [%(id)s].%(ext)s`),
+      '--no-warnings',
+      url
+    ];
+    
+    // Add same format selection logic as in download
+    if (audioOnly) {
+      args.push('--extract-audio', '--audio-format', format, '--audio-quality', quality);
+    } else {
+      if (isYouTubeUrl(url)) {
+        if (quality === 'best') {
+          args.push('--format', 'bestvideo+bestaudio/best');
+        } else if (quality === 'worst') {
+          args.push('--format', 'worst');
+        } else {
+          const height = quality.replace('p', '');
+          args.push('--format', `bestvideo[height<=${height}]+bestaudio/best`);
+        }
+      } else {
+        if (quality === 'best') {
+          args.push('--format', '1080p/720p/480p/240p/best');
+        } else if (quality === 'worst') {
+          args.push('--format', '240p/worst');
+        } else {
+          args.push('--format', `${quality}/(bestvideo[height<=${quality.replace('p', '')}]+bestaudio)/best`);
+        }
+      }
+    }
+    
+    // Add site-specific headers (same as in download)
+    if (isYouTubeUrl(url)) {
+      args.push('--extractor-args', 'youtube:player_client=web,android');
+      args.push('--add-header', HTTP_HEADERS.REFERER);
+      args.push('--add-header', `user-agent:${HTTP_HEADERS.USER_AGENT}`);
+    } else {
+      // Other video hosts: optimization for speed
+      args.push('--add-header', 'User-Agent:Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36');
+      args.push('--add-header', 'Accept:text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8');
+      args.push('--add-header', 'Accept-Language:en-US,en;q=0.5');
+      args.push('--add-header', 'Accept-Encoding:gzip, deflate');
+      args.push('--add-header', 'DNT:1');
+      args.push('--add-header', 'Connection:keep-alive');
+      args.push('--add-header', 'Upgrade-Insecure-Requests:1');
+    }
+    
+    // Add browser cookies if available
+    if (browser) {
+      args.unshift('--cookies-from-browser', browser);
+    }
+    
+    const childProcess = spawn(ytdlpPath, args, {
+      stdio: ['ignore', 'pipe', 'pipe']
+    });
+    
+    let stdout = '';
+    let stderr = '';
+    
+    childProcess.stdout.on('data', (data) => {
+      stdout += data.toString();
+    });
+    
+    childProcess.stderr.on('data', (data) => {
+      stderr += data.toString();
+    });
+    
+    childProcess.on('close', (code) => {
+      if (code === UI_CONSTANTS.EXIT_CODE_SUCCESS && stdout.trim()) {
+        let filename = path.basename(stdout.trim());
+        
+        // For audio extraction, replace extension with audio format
+        if (audioOnly) {
+          const nameWithoutExt = filename.replace(/\.[^.]+$/, '');
+          filename = `${nameWithoutExt}.${format}`;
+        }
+        
+        resolve(filename);
+      } else {
+        const error = new Error(`Failed to get filename: ${stderr}`);
+        error.stdout = stdout;
+        error.stderr = stderr;
+        error.exitCode = code;
+        reject(error);
+      }
+    });
+    
+    childProcess.on('error', (error) => {
+      reject(new Error(`Process error getting filename: ${error.message}`));
+    });
+  });
+}
+
+async function checkFileExists(filePath) {
+  try {
+    await fs.access(filePath);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 async function callYtDlpDirectly(url, options, progressCallback = null) {
   const { audioOnly, format, quality, outputPath, cookiesFromBrowser, verbose } = options;
   return new Promise((resolve, reject) => {
@@ -290,17 +398,44 @@ export async function downloadVideo(url, options = {}) {
     throw new Error(ERROR_MESSAGES.DIRECTORY_ERROR);
   }
 
-  const progressBar = new cliProgress.SingleBar({
-    format: 'Download |{bar}| {percentage}% | {value}/{total} | {filename}',
-    barCompleteChar: '\u2588',
-    barIncompleteChar: '\u2591',
-    hideCursor: true
-  });
-
-  let progressStarted = false;
-
+  // 1. Get expected filename BEFORE downloading
   try {
+    logProgress('Checking if file already exists...');
+    
+    const expectedFilename = await getExpectedFilename(url, {
+      audioOnly,
+      format, 
+      quality,
+      outputPath: fullOutputPath,
+      browser: browser || 'safari' // Default to safari for filename detection
+    });
+    
+    const fullFilePath = path.join(fullOutputPath, expectedFilename);
+    
+    // 2. Check if file already exists
+    const fileExists = await checkFileExists(fullFilePath);
+    
+    if (fileExists) {
+      logInfo(`File already exists: ${expectedFilename}`);
+      return {
+        success: true,
+        outputPath: fullOutputPath,
+        filename: expectedFilename,
+        skipped: true
+      };
+    }
+    
+    // 3. File doesn't exist, proceed with download
     logProgress('Starting download...');
+    
+    const progressBar = new cliProgress.SingleBar({
+      format: 'Download |{bar}| {percentage}% | {value}/{total} | {filename}',
+      barCompleteChar: '\u2588',
+      barIncompleteChar: '\u2591',
+      hideCursor: true
+    });
+
+    let progressStarted = false;
 
     const downloadOptions = {
       audioOnly: audioOnly,
@@ -424,57 +559,34 @@ export async function downloadVideo(url, options = {}) {
 
     logSuccess(SUCCESS_MESSAGES.DOWNLOAD_COMPLETE);
     
-    // Show only the latest created file
-    try {
-      const files = await fs.readdir(fullOutputPath);
-      const mediaFiles = audioOnly 
-        ? files.filter(file => 
-            file.endsWith('.m4a') || file.endsWith('.mp3') || 
-            file.endsWith('.wav') || file.endsWith('.flac')
-          )
-        : files.filter(file => 
-            file.endsWith('.mp4') || file.endsWith('.mkv') || file.endsWith('.webm') ||
-            file.endsWith('.m4a') || file.endsWith('.mp3') || file.endsWith('.wav') || file.endsWith('.flac')
-          );
-      
-      // Sort by modification time (newest first)
-      const filesWithStats = await Promise.all(
-        mediaFiles.map(async (file) => {
-          const filePath = path.join(fullOutputPath, file);
-          const stat = await fs.stat(filePath);
-          return { file, mtime: stat.mtime };
-        })
-      );
-      
-      filesWithStats.sort((a, b) => b.mtime - a.mtime);
-      
-      if (filesWithStats.length > UI_CONSTANTS.PROGRESS_MIN) {
-        const latestFile = filesWithStats[0].file;
-        console.log(latestFile);
-        
-        if (verbose) {
-          logInfo(`Folder: ${fullOutputPath}`);
-          if (successfulBrowser) {
-            logInfo(`Cookies: ${successfulBrowser}`);
-          }
-        }
-      } else {
-        logWarning(`${audioOnly ? 'Audio' : 'Media'} file not found! Possible download issue.`);
-        if (verbose) {
-          logInfo(`Check folder: ${fullOutputPath}`);
-        }
+    // Show the downloaded file (we know the exact filename)
+    console.log(expectedFilename);
+    
+    if (verbose) {
+      logInfo(`Folder: ${fullOutputPath}`);
+      if (successfulBrowser) {
+        logInfo(`Cookies: ${successfulBrowser}`);
       }
-    } catch (error) {
-      logWarning('Unable to check created files:', error.message);
     }
 
     return {
       success: true,
       outputPath: fullOutputPath,
+      filename: expectedFilename,
       result
     };
 
   } catch (error) {
+    // Handle filename detection errors  
+    if (error.message && error.message.includes('Failed to get filename')) {
+      logError('Unable to get video information. Check URL and try again.');
+      return {
+        success: false,
+        error: error.message
+      };
+    }
+    
+    // Handle download errors
     if (progressStarted) {
       progressBar.stop();
     }

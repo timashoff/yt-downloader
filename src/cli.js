@@ -16,8 +16,8 @@ import { logError, logSuccess, logInfo } from './logger.js'
 const program = new Command()
 
 program
-  .name('video-downloader')
-  .description('Universal video downloader for any website')
+  .name('universal-downloader')
+  .description('Universal downloader for any website')
   .version('1.0.0')
   .option(
     '-o, --output <dir>',
@@ -45,7 +45,7 @@ program
   .argument('<url>', 'Video URL to download')
   .action(async (url, options) => {
     try {
-      console.log(chalk.bold.blue('\nUniversal Video Downloader\n'))
+      console.log(chalk.bold.blue('\nUniversal Downloader\n'))
       
       // Manual argv parsing as fallback for Commander.js issues
       const argv = process.argv;
