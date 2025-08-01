@@ -19,6 +19,7 @@ npm run audio "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
 
 - ✅ **Universal Support**: Works with YouTube, video hosting sites, and hundreds of other websites
 - ⚡ **Optimized Speed**: Smart format selection for faster downloads (up to 8MB/s vs 500KB/s)
+- 📁 **Smart File Organization**: Automatically organizes files into `~/Downloads/Audio/{domain}/` or `~/Downloads/Video/{domain}/`
 - 🎵 **Audio Extraction**: Extract audio in multiple formats (MP3, M4A, WAV, FLAC)
 - 🎬 **Video Download**: Download videos in available qualities
 - 🔄 **Smart Timeout**: Dynamic timeout that resets on activity, prevents hanging
@@ -76,7 +77,7 @@ node src/cli.js "URL" -a     # audio
 # Verbose output for troubleshooting
 npm run video "URL" -- -v
 
-# Custom output directory
+# Custom output directory (overrides smart organization)
 npm run video "URL" -- -o ./downloads
 
 # Video info before download
@@ -87,6 +88,50 @@ npm run video "URL" -- -b chrome
 
 # Custom audio format (audio mode only)
 npm run audio "URL" -- -f mp3
+```
+
+## File Organization
+
+By default, the tool automatically organizes downloaded files into your system's Downloads folder with a smart directory structure:
+
+### Directory Structure
+
+```
+~/Downloads/
+├── Audio/
+│   ├── youtube/
+│   │   ├── Song Title [video_id].m4a
+│   │   └── Another Song [video_id].mp3
+│   ├── instagram/
+│   │   └── Audio File [id].m4a
+│   └── soundcloud/
+│       └── Track Name [id].wav
+└── Video/
+    ├── youtube/
+    │   ├── Video Title [video_id].mp4
+    │   └── Another Video [video_id].webm
+    ├── tiktok/
+    │   └── Video [id].mp4
+    └── twitter/
+        └── Tweet Video [id].mp4
+```
+
+### How it Works
+
+- **Audio downloads** (`npm run audio` or `-a` flag) → `~/Downloads/Audio/{domain}/`
+- **Video downloads** (default mode) → `~/Downloads/Video/{domain}/`  
+- **Domain extraction**: Automatically extracts clean domain names (e.g., `youtube` from `youtube.com`)
+- **Duplicate prevention**: Checks if file exists before downloading
+- **Auto-creation**: Creates directories automatically as needed
+
+### Custom Output Directory
+
+You can override the smart organization by specifying a custom output directory:
+
+```bash
+# Save to custom location instead of smart organization
+npm run video "URL" -- -o ./my-videos
+npm run audio "URL" -- -o ./my-music
 ```
 
 ## Supported Sites
@@ -158,7 +203,7 @@ npm run video https://example.com/video?id=123&t=45
 
 ### Options
 
-- `-o, --output <dir>` - Save directory (default: `./downloads`)
+- `-o, --output <dir>` - Custom output directory (default: smart organization to `~/Downloads/Audio|Video/{domain}/`)
 - `-a, --audio` - Extract audio only (default: download video)
 - `-f, --format <format>` - Audio format: `mp3|m4a|wav|flac` (default: `m4a`)
 - `-q, --quality <quality>` - Video quality: `best|worst|720p|1080p|480p|360p` (default: `best`)
@@ -183,11 +228,18 @@ npm run video "https://www.youtube.com/watch?v=dQw4w9WgXcQ" -- -b safari
 # Show video info first
 npm run video "https://www.youtube.com/watch?v=dQw4w9WgXcQ" -- -i
 
-# Custom output directory
+# Custom output directory (overrides smart organization)
 npm run video "https://www.youtube.com/watch?v=dQw4w9WgXcQ" -- -o ./music
 
 # Verbose troubleshooting
 npm run video "https://www.youtube.com/watch?v=dQw4w9WgXcQ" -- -v
+
+# Smart organization examples:
+# This audio file → ~/Downloads/Audio/youtube/Song Title [id].m4a
+npm run audio "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+
+# This video file → ~/Downloads/Video/instagram/Video Title [id].mp4  
+npm run video "https://www.instagram.com/p/example"
 ```
 
 ## Dependencies
@@ -220,6 +272,7 @@ npm run audio "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
 
 - ✅ **Универсальная поддержка**: Работает с YouTube, видеохостингами и сотнями других сайтов
 - ⚡ **Оптимизированная скорость**: Умный выбор формата для быстрых загрузок (до 8МБ/с против 500КБ/с)
+- 📁 **Умная организация файлов**: Автоматически организует файлы в `~/Downloads/Audio/{домен}/` или `~/Downloads/Video/{домен}/`
 - 🎵 **Извлечение аудио**: Извлечение аудио в разных форматах (MP3, M4A, WAV, FLAC)
 - 🎬 **Скачивание видео**: Скачивание видео в доступных качествах
 - 🔄 **Умный таймаут**: Динамический таймаут, который сбрасывается при активности
@@ -261,7 +314,7 @@ node src/cli.js "URL" -a     # аудио
 # Подробный вывод для диагностики
 npm run video "URL" -- -v
 
-# Своя папка для сохранения
+# Своя папка для сохранения (переопределяет умную организацию)
 npm run video "URL" -- -o ./downloads
 
 # Информация о видео перед скачиванием
@@ -272,6 +325,50 @@ npm run video "URL" -- -b chrome
 
 # Формат аудио (только для аудио режима)
 npm run audio "URL" -- -f mp3
+```
+
+## Организация файлов
+
+По умолчанию инструмент автоматически организует загруженные файлы в папку Downloads с умной структурой каталогов:
+
+### Структура каталогов
+
+```
+~/Downloads/
+├── Audio/
+│   ├── youtube/
+│   │   ├── Название песни [video_id].m4a
+│   │   └── Другая песня [video_id].mp3
+│   ├── instagram/
+│   │   └── Аудио файл [id].m4a
+│   └── soundcloud/
+│       └── Название трека [id].wav
+└── Video/
+    ├── youtube/
+    │   ├── Название видео [video_id].mp4
+    │   └── Другое видео [video_id].webm
+    ├── tiktok/
+    │   └── Видео [id].mp4
+    └── twitter/
+        └── Видео из твита [id].mp4
+```
+
+### Как это работает
+
+- **Загрузки аудио** (`npm run audio` или флаг `-a`) → `~/Downloads/Audio/{домен}/`
+- **Загрузки видео** (режим по умолчанию) → `~/Downloads/Video/{домен}/`  
+- **Извлечение домена**: Автоматически извлекает чистые названия доменов (например, `youtube` из `youtube.com`)
+- **Предотвращение дубликатов**: Проверяет существование файла перед загрузкой
+- **Автосоздание**: Создает каталоги автоматически по мере необходимости
+
+### Пользовательская папка для сохранения
+
+Вы можете переопределить умную организацию, указав пользовательскую папку:
+
+```bash
+# Сохранить в указанное место вместо умной организации
+npm run video "URL" -- -o ./мои-видео
+npm run audio "URL" -- -o ./моя-музыка
 ```
 
 ## Поддерживаемые сайты
@@ -333,9 +430,16 @@ npm run video "https://www.youtube.com/watch?v=dQw4w9WgXcQ" -- -b safari
 # Показать информацию о видео сначала
 npm run video "https://www.youtube.com/watch?v=dQw4w9WgXcQ" -- -i
 
-# Своя папка для сохранения
+# Своя папка для сохранения (переопределяет умную организацию)
 npm run video "https://www.youtube.com/watch?v=dQw4w9WgXcQ" -- -o ./music
 
 # Подробная диагностика
 npm run video "https://www.youtube.com/watch?v=dQw4w9WgXcQ" -- -v
+
+# Примеры умной организации:
+# Этот аудио файл → ~/Downloads/Audio/youtube/Название песни [id].m4a
+npm run audio "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+
+# Этот видео файл → ~/Downloads/Video/instagram/Название видео [id].mp4  
+npm run video "https://www.instagram.com/p/example"
 ```

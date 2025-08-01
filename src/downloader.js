@@ -1,11 +1,43 @@
 import youtubedl from 'youtube-dl-exec';
 import path from 'path';
 import fs from 'fs/promises';
+import os from 'os';
 import cliProgress from 'cli-progress';
 import { spawn } from 'child_process';
 import { DEFAULT_CONFIG, YTDLP_OPTIONS, YTDLP_AUDIO_OPTIONS, YTDLP_YOUTUBE_HEADERS, ERROR_MESSAGES, SUCCESS_MESSAGES, UI_CONSTANTS, HTTP_HEADERS } from './constants.js';
 import { isYouTubeUrl } from './validator.js';
 import { logError, logSuccess, logInfo, logProgress, logWarning } from './logger.js';
+
+function getSystemDownloadsPath() {
+  return path.join(os.homedir(), 'Downloads');
+}
+
+function extractDomain(url) {
+  try {
+    const hostname = new URL(url).hostname;
+    // Remove prefixes like www., m., mobile.
+    const cleanHostname = hostname.replace(/^(www\.|m\.|mobile\.)/, '');
+    // Extract domain name without extension (.com, .org, .net, etc.)
+    const domain = cleanHostname.split('.')[0];
+    return domain;
+  } catch (error) {
+    // Fallback to 'unknown' if URL parsing fails
+    return 'unknown';
+  }
+}
+
+function buildOutputPath(url, audioOnly, customOutputDir = null) {
+  // If custom output directory is specified, use it
+  if (customOutputDir && customOutputDir !== DEFAULT_CONFIG.OUTPUT_DIR) {
+    return path.resolve(customOutputDir);
+  }
+  
+  // Otherwise, use smart organization
+  const downloadsPath = getSystemDownloadsPath();
+  const contentType = audioOnly ? 'Audio' : 'Video';
+  const domain = extractDomain(url);
+  return path.join(downloadsPath, contentType, domain);
+}
 
 async function getExpectedFilename(url, options) {
   const { audioOnly, format, quality, outputPath, browser = null } = options;
@@ -392,7 +424,12 @@ export async function downloadVideo(url, options = {}) {
     });
   }
 
-  const fullOutputPath = path.resolve(outputDir);
+  // Use smart path organization or custom path
+  const fullOutputPath = buildOutputPath(url, audioOnly, outputDir);
+  
+  if (verbose) {
+    logInfo(`📁 Output directory: ${fullOutputPath}`);
+  }
   
   if (!(await createOutputDirectory(fullOutputPath))) {
     throw new Error(ERROR_MESSAGES.DIRECTORY_ERROR);
