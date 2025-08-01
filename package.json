@@ -9,6 +9,8 @@
   },
   "scripts": {
     "start": "node src/cli.js",
+    "audio": "node src/cli.js -a",
+    "video": "node src/cli.js",
     "check-dead-code": "npx unimported",
     "lint": "npx eslint src/ --fix",
     "update-ytdlp": "YOUTUBE_DL_SKIP_DOWNLOAD= npm install --force"

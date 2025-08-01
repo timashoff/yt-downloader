@@ -1,9 +1,11 @@
 export const DEFAULT_CONFIG = {
   OUTPUT_DIR: './downloads',
+  VIDEO_QUALITY: 'best',
   AUDIO_FORMAT: 'm4a',
   AUDIO_QUALITY: 'best',
   SUPPORTED_FORMATS: ['mp3', 'm4a', 'wav', 'flac'],
-  QUALITY_OPTIONS: ['best', 'worst'],
+  VIDEO_QUALITY_OPTIONS: ['best', 'worst', '720p', '1080p', '480p', '360p'],
+  AUDIO_QUALITY_OPTIONS: ['best', 'worst'],
   SUPPORTED_BROWSERS: ['chrome', 'firefox', 'safari', 'edge'],
   BROWSER_FALLBACK_ORDER: ['safari', 'chrome', 'firefox', 'edge']
 };
@@ -16,22 +18,26 @@ export const YOUTUBE_DOMAINS = [
   'music.youtube.com'
 ];
 
+// TODO: For i18n support, move these to separate language files (e.g., locales/en.js, locales/ru.js)
+// and create a translation function t(key, params) that loads appropriate language
 export const ERROR_MESSAGES = {
-  INVALID_URL: 'Неверный YouTube URL. Поддерживаются только ссылки на YouTube.',
-  MISSING_URL: 'URL не указан. Пожалуйста, укажите ссылку на YouTube видео.',
-  DOWNLOAD_FAILED: 'Ошибка при скачивании. Проверьте URL и интернет-соединение.',
-  INVALID_FORMAT: 'Неподдерживаемый формат аудио.',
-  INVALID_QUALITY: 'Неподдерживаемое качество аудио.',
-  DIRECTORY_ERROR: 'Ошибка при создании директории.',
-  INVALID_BROWSER: 'Неподдерживаемый браузер.',
-  COOKIES_FILE_NOT_FOUND: 'Файл cookies не найден.',
-  YOUTUBE_BOT_DETECTION: 'YouTube заблокировал доступ. Нужны cookies из браузера.',
-  FFMPEG_NOT_FOUND: 'FFmpeg не найден. Установите FFmpeg для обработки аудио.'
+  INVALID_URL: 'Invalid URL format.',
+  MISSING_URL: 'URL not specified. Please provide a video link.',
+  DOWNLOAD_FAILED: 'Download error. Check URL and internet connection.',
+  INVALID_FORMAT: 'Unsupported audio format.',
+  INVALID_AUDIO_QUALITY: 'Unsupported audio quality.',
+  INVALID_VIDEO_QUALITY: 'Unsupported video quality.',
+  DIRECTORY_ERROR: 'Error creating directory.',
+  INVALID_BROWSER: 'Unsupported browser.',
+  COOKIES_FILE_NOT_FOUND: 'Cookies file not found.',
+  YOUTUBE_BOT_DETECTION: 'YouTube blocked access. Browser cookies needed.',
+  FFMPEG_NOT_FOUND: 'FFmpeg not found. Install FFmpeg for audio processing.'
 };
 
+// TODO: For i18n support, move these to locales/ directory
 export const SUCCESS_MESSAGES = {
-  DOWNLOAD_COMPLETE: 'Скачивание завершено успешно!',
-  DIRECTORY_CREATED: 'Директория создана:'
+  DOWNLOAD_COMPLETE: 'Download completed successfully!',
+  DIRECTORY_CREATED: 'Directory created:'
 };
 
 export const UI_CONSTANTS = {
@@ -51,6 +57,17 @@ export const HTTP_HEADERS = {
 };
 
 export const YTDLP_OPTIONS = {
+  // Default: video download
+  quality: DEFAULT_CONFIG.VIDEO_QUALITY,
+  output: `%(title).${UI_CONSTANTS.TITLE_MAX_LENGTH}s [%(id)s].%(ext)s`,
+  windowsFilenames: false,
+  noWarnings: true,
+  noCheckCertificates: true,
+  compatOptions: ['no-certifi']
+};
+
+export const YTDLP_AUDIO_OPTIONS = {
+  // Audio extraction options
   extractAudio: true,
   audioFormat: DEFAULT_CONFIG.AUDIO_FORMAT,
   audioQuality: DEFAULT_CONFIG.AUDIO_QUALITY,
@@ -58,7 +75,10 @@ export const YTDLP_OPTIONS = {
   windowsFilenames: false,
   noWarnings: true,
   noCheckCertificates: true,
-  compatOptions: ['no-certifi'],
+  compatOptions: ['no-certifi']
+};
+
+export const YTDLP_YOUTUBE_HEADERS = {
   extractorArgs: 'youtube:player_client=web,android',
   addHeader: [
     HTTP_HEADERS.REFERER,

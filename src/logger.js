@@ -1,7 +1,7 @@
 import chalk from 'chalk';
 
 export function logError(message, error = null) {
-  console.error(chalk.red('✗ Ошибка:'), message);
+  console.error(chalk.red('✗ Error:'), message);
   if (error && process.env.DEBUG) {
     console.error(chalk.gray(error.stack));
   }
