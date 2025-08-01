@@ -24,15 +24,27 @@ async function callYtDlpDirectly(url, options, progressCallback = null) {
     if (audioOnly) {
       args.push('--extract-audio', '--audio-format', format, '--audio-quality', quality);
     } else {
-      if (quality === 'best') {
-        // Use best available format (YouTube may limit quality based on region/auth)
-        args.push('--format', 'bestvideo+bestaudio/best');
-      } else if (quality === 'worst') {
-        args.push('--format', 'worst');
+      // Site-specific format selection
+      if (isYouTubeUrl(url)) {
+        // YouTube uses separate video+audio streams
+        if (quality === 'best') {
+          args.push('--format', 'bestvideo+bestaudio/best');
+        } else if (quality === 'worst') {
+          args.push('--format', 'worst');
+        } else {
+          const height = quality.replace('p', '');
+          args.push('--format', `bestvideo[height<=${height}]+bestaudio/best`);
+        }
       } else {
-        // For resolutions like 720p, 1080p - use separate streams
-        const height = quality.replace('p', '');
-        args.push('--format', `bestvideo[height<=${height}]+bestaudio/best`);
+        // Other video hosts: prefer direct HTTPS downloads over HLS (much faster)
+        if (quality === 'best') {
+          args.push('--format', '1080p/720p/480p/240p/best');
+        } else if (quality === 'worst') {
+          args.push('--format', '240p/worst');
+        } else {
+          // For specific quality, prefer direct format over HLS
+          args.push('--format', `${quality}/(bestvideo[height<=${quality.replace('p', '')}]+bestaudio)/best`);
+        }
       }
     }
     
@@ -41,8 +53,8 @@ async function callYtDlpDirectly(url, options, progressCallback = null) {
       args.push('--extractor-args', 'youtube:player_client=web,android');
       args.push('--add-header', HTTP_HEADERS.REFERER);
       args.push('--add-header', `user-agent:${HTTP_HEADERS.USER_AGENT}`);
-    } else if (url.includes('pornhub.com')) {
-      // Pornhub-specific options
+    } else {
+      // Other video hosts: optimization for speed
       args.push('--add-header', 'User-Agent:Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36');
       args.push('--add-header', 'Accept:text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8');
       args.push('--add-header', 'Accept-Language:en-US,en;q=0.5');
@@ -50,6 +62,11 @@ async function callYtDlpDirectly(url, options, progressCallback = null) {
       args.push('--add-header', 'DNT:1');
       args.push('--add-header', 'Connection:keep-alive');
       args.push('--add-header', 'Upgrade-Insecure-Requests:1');
+      
+      // HLS optimization (in case we fall back to HLS)
+      args.push('--concurrent-fragments', '4');
+      args.push('--fragment-retries', '10');
+      args.push('--hls-prefer-native');
     }
     
     if (cookiesFromBrowser) {
@@ -77,11 +94,12 @@ async function callYtDlpDirectly(url, options, progressCallback = null) {
     let stderr = '';
     let videoTitle = '';
     let isKilled = false;
+    let lastProgressTime = Date.now();
     
-    // Add timeout to prevent infinite hanging
-    const timeout = setTimeout(() => {
+    // Dynamic timeout - reset on progress, kill if no activity for 60 seconds
+    let timeout = setTimeout(() => {
       if (verbose) {
-        console.log('🔍 TIMEOUT: Killing yt-dlp process after 30 seconds');
+        console.log('🔍 TIMEOUT: Killing yt-dlp process after 60 seconds of no activity');
       }
       isKilled = true;
       childProcess.kill('SIGTERM');
@@ -95,15 +113,39 @@ async function callYtDlpDirectly(url, options, progressCallback = null) {
           childProcess.kill('SIGKILL');
         }
       }, 5000);
-    }, 30000); // 30 second timeout
+    }, 60000); // 60 second timeout for no activity
+    
+    // Function to reset timeout when there's activity
+    const resetTimeout = () => {
+      clearTimeout(timeout);
+      lastProgressTime = Date.now();
+      timeout = setTimeout(() => {
+        if (verbose) {
+          console.log('🔍 TIMEOUT: Killing yt-dlp process after 60 seconds of no activity');
+        }
+        isKilled = true;
+        childProcess.kill('SIGTERM');
+        
+        setTimeout(() => {
+          if (!childProcess.killed) {
+            if (verbose) {
+              console.log('🔍 FORCE KILL: Using SIGKILL');
+            }
+            childProcess.kill('SIGKILL');
+          }
+        }, 5000);
+      }, 60000);
+    };
     
     childProcess.stdout.on('data', (data) => {
       stdout += data.toString();
+      resetTimeout(); // Reset timeout on any stdout activity
     });
     
     childProcess.stderr.on('data', (data) => {
       const chunk = data.toString();
       stderr += chunk;
+      resetTimeout(); // Reset timeout on any stderr activity
       
       // Parse video title from Destination path
       const destinationMatch = chunk.match(/\[download\] Destination: .+\/(.+?)\.[^.]+$/);
@@ -132,7 +174,7 @@ async function callYtDlpDirectly(url, options, progressCallback = null) {
       clearTimeout(timeout); // Clear timeout if process completes normally
       
       if (isKilled) {
-        const error = new Error('Process timed out after 30 seconds');
+        const error = new Error('Process timed out after 60 seconds of no activity');
         error.stdout = stdout;
         error.stderr = stderr;
         error.exitCode = -1;
@@ -358,7 +400,7 @@ export async function downloadVideo(url, options = {}) {
           logSuccess('Download successful!');
         } catch (error) {
           if (error.timeout) {
-            logError('Download timed out after 30 seconds - site may be unresponsive or blocked');
+            logError('Download timed out after 60 seconds of no activity - site may be unresponsive or blocked');
           } else {
             logError('Download failed:', error.message);
           }

@@ -56,14 +56,21 @@ program
         options.audio = true;
       }
       
-      // Fix URL escaping using proper decoding instead of regex
+      // Fix URL escaping - handle both URI encoding and shell escaping
       let fixedUrl = url;
+      
+      // First handle shell escaping (backslashes before special characters)
+      fixedUrl = fixedUrl.replace(/\\([?&=])/g, '$1'); // Remove backslashes before ?, &, =
+      
+      // Then try URI decoding if needed
       try {
-        // Handle shell escaping by using decodeURIComponent if needed
-        fixedUrl = decodeURIComponent(url);
+        const decoded = decodeURIComponent(fixedUrl);
+        // Only use decoded version if it looks like a valid URL
+        if (decoded.startsWith('http')) {
+          fixedUrl = decoded;
+        }
       } catch {
-        // If decoding fails, try simple string replacement
-        fixedUrl = url.replace(/\\\\/g, '');
+        // If decoding fails, keep the shell-unescaped version
       }
       
       // Use fixed URL instead of original
