@@ -24,15 +24,16 @@ program
     `Save directory (default: ${DEFAULT_CONFIG.OUTPUT_DIR})`,
     DEFAULT_CONFIG.OUTPUT_DIR,
   )
-  .option('-a, --audio', 'Extract audio only (default: download video)')
+  .option('-a, --audio', 'Extract audio only (explicit)')
+  .option('-v, --video', 'Download video (default: audio)')
   .option(
     '-f, --format <format>',
-    `Audio format (only with -a): ${DEFAULT_CONFIG.SUPPORTED_FORMATS.join('|')} (default: ${DEFAULT_CONFIG.AUDIO_FORMAT})`,
+    `Audio format: ${DEFAULT_CONFIG.SUPPORTED_FORMATS.join('|')} (default: ${DEFAULT_CONFIG.AUDIO_FORMAT})`,
     DEFAULT_CONFIG.AUDIO_FORMAT,
   )
   .option(
     '-q, --quality <quality>',
-    `Video quality: ${DEFAULT_CONFIG.VIDEO_QUALITY_OPTIONS.join('|')} (default: ${DEFAULT_CONFIG.VIDEO_QUALITY})`,
+    `Video/Audio quality: ${DEFAULT_CONFIG.VIDEO_QUALITY_OPTIONS.join('|')} (default: ${DEFAULT_CONFIG.VIDEO_QUALITY})`,
     DEFAULT_CONFIG.VIDEO_QUALITY,
   )
   .option('-i, --info', 'Show video information before downloading')
@@ -41,19 +42,24 @@ program
     'Browser for cookies: chrome|firefox|safari|edge',
   )
   .option('-c, --cookies <file>', 'Path to cookies.txt file')
-  .option('-v, --verbose', 'Show detailed yt-dlp output')
+  .option('--verbose', 'Show detailed yt-dlp output')
   .argument('<url>', 'Video URL to download')
   .action(async (url, options) => {
     try {
       console.log(chalk.bold.blue('\nUniversal Downloader\n'))
       
-      // Manual argv parsing as fallback for Commander.js issues
+      // Determine mode: audio by default, video if -v flag is used
       const argv = process.argv;
+      const hasVideoFlag = argv.includes('-v') || argv.includes('--video');
       const hasAudioFlag = argv.includes('-a') || argv.includes('--audio');
       
-      // Override Commander.js if manual detection finds the flag
-      if (hasAudioFlag && !options.audio) {
-        options.audio = true;
+      // Default is audio, unless video flag is explicitly specified
+      let audioOnly = true; // Default to audio
+      if (hasVideoFlag) {
+        audioOnly = false; // Explicit video mode
+      }
+      if (hasAudioFlag) {
+        audioOnly = true; // Explicit audio mode (redundant but clear)
       }
       
       // Fix URL escaping - handle both URI encoding and shell escaping
@@ -89,7 +95,7 @@ program
         process.exit(UI_CONSTANTS.EXIT_CODE_ERROR)
       }
 
-      if (options.audio) {
+      if (audioOnly) {
         // Validate audio quality for audio extraction
         if (!(await validateAudioQuality(options.quality))) {
           logError(
@@ -143,14 +149,15 @@ program
         browser: options.browser,
         cookiesFile: options.cookies,
         verbose: options.verbose,
-        audioOnly: options.audio,
+        audioOnly: audioOnly,
       }
       
       // Debug logging only in verbose mode
       if (options.verbose) {
         console.log('🔍 CLI Debug:', { 
-          audio: options.audio, 
-          audioOnly: options.audio,
+          hasVideoFlag,
+          hasAudioFlag,
+          audioOnly,
           quality: options.quality,
           url: url
         });

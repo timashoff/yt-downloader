@@ -2,17 +2,34 @@
 
 A fast, universal CLI tool for downloading videos and audio from any website including YouTube, video hosting sites, and more.
 
+> **Command name**: `udav` (**U**niversal **D**ownload **A**udio **V**ideo)
+
 ## Quick Start
+
+### Global Installation (Recommended)
+
+```bash
+# Install globally
+npm install -g .
+
+# Download audio (default mode)
+udav "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+
+# Download video  
+udav "https://www.youtube.com/watch?v=dQw4w9WgXcQ" -v
+```
+
+### Local Development
 
 ```bash
 # Install dependencies
 npm install
 
-# Download video (default mode)
-npm run video "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
-
-# Download audio only
+# Download audio (default mode)
 npm run audio "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+
+# Download video
+npm run video "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
 ```
 
 ## Features
@@ -77,34 +94,56 @@ sudo yum install ffmpeg  # CentOS/RHEL
 ### Basic Usage
 
 ```bash
-# Download video
-npm run video "URL"
+# Audio download (default mode)
+udav "URL"
 
-# Download audio only  
+# Video download
+udav "URL" -v
+
+# Explicit audio (same as default)
+udav "URL" -a
+```
+
+### Local Development Alternative
+
+```bash
+# Audio download (default mode)
 npm run audio "URL"
+node src/cli.js "URL"        # default is now audio
 
-# Alternative direct usage
-node src/cli.js "URL"        # video
-node src/cli.js "URL" -a     # audio
+# Video download  
+npm run video "URL"
+node src/cli.js "URL" -v     # explicit video
 ```
 
 ### Advanced Options
 
 ```bash
 # Verbose output for troubleshooting
-npm run video "URL" -- -v
+udav "URL" --verbose
 
 # Custom output directory (overrides smart organization)
-npm run video "URL" -- -o ./downloads
+udav "URL" -o ./downloads
 
 # Video info before download
-npm run video "URL" -- -i
+udav "URL" -i
 
 # Use browser cookies (for authenticated content)
-npm run video "URL" -- -b chrome
+udav "URL" -b safari
 
-# Custom audio format (audio mode only)
-npm run audio "URL" -- -f mp3
+# Custom audio format
+udav "URL" -f mp3
+
+# Video with specific quality
+udav "URL" -v -q 720p
+```
+
+### Using npm scripts (alternative)
+
+```bash
+# With npm run (for development)
+npm run audio "URL" -- --verbose
+npm run video "URL" -- -o ./downloads
 ```
 
 ## File Organization
@@ -135,8 +174,8 @@ By default, the tool automatically organizes downloaded files into your system's
 
 ### How it Works
 
-- **Audio downloads** (`npm run audio` or `-a` flag) → `~/Downloads/Audio/{domain}/`
-- **Video downloads** (default mode) → `~/Downloads/Video/{domain}/`  
+- **Audio downloads** (default mode or `-a` flag) → `~/Downloads/Audio/{domain}/`
+- **Video downloads** (`-v` flag) → `~/Downloads/Video/{domain}/`  
 - **Domain extraction**: Automatically extracts clean domain names (e.g., `youtube` from `youtube.com`)
 - **Duplicate prevention**: Checks if file exists before downloading
 - **Auto-creation**: Creates directories automatically as needed
@@ -147,8 +186,8 @@ You can override the smart organization by specifying a custom output directory:
 
 ```bash
 # Save to custom location instead of smart organization
-npm run video "URL" -- -o ./my-videos
-npm run audio "URL" -- -o ./my-music
+udav "URL" -v -o ./my-videos    # video to custom location
+udav "URL" -o ./my-music        # audio to custom location
 ```
 
 ## Supported Sites
@@ -228,45 +267,55 @@ npm run video https://example.com/video?id=123&t=45
 
 ## Command Reference
 
+### Global Installation
+
+```bash
+npm install -g .
+```
+
 ### Options
 
+- `-a, --audio` - Extract audio only (explicit, same as default)
+- `-v, --video` - Download video (default: audio mode)
 - `-o, --output <dir>` - Custom output directory (default: smart organization to `~/Downloads/Audio|Video/{domain}/`)
-- `-a, --audio` - Extract audio only (default: download video)
 - `-f, --format <format>` - Audio format: `mp3|m4a|wav|flac` (default: `m4a`)
-- `-q, --quality <quality>` - Video quality: `best|worst|720p|1080p|480p|360p` (default: `best`)
+- `-q, --quality <quality>` - Video/Audio quality: `best|worst|720p|1080p|480p|360p` (default: `best`)
 - `-i, --info` - Show video information before downloading
 - `-b, --browser <browser>` - Browser for cookies: `chrome|firefox|safari|edge`
 - `-c, --cookies <file>` - Path to cookies.txt file
-- `-v, --verbose` - Show detailed yt-dlp output
+- `--verbose` - Show detailed yt-dlp output
 - `-h, --help` - Show help
 
 ### Examples
 
 ```bash
-# Basic video download
-npm run video "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+# Basic audio download (default)
+udav "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+
+# Video download
+udav "https://www.youtube.com/watch?v=dQw4w9WgXcQ" -v
 
 # Audio in MP3 format
-npm run audio "https://www.youtube.com/watch?v=dQw4w9WgXcQ" -- -f mp3
+udav "https://www.youtube.com/watch?v=dQw4w9WgXcQ" -f mp3
 
 # Video with browser cookies
-npm run video "https://www.youtube.com/watch?v=dQw4w9WgXcQ" -- -b safari
+udav "https://www.youtube.com/watch?v=dQw4w9WgXcQ" -v -b safari
 
 # Show video info first
-npm run video "https://www.youtube.com/watch?v=dQw4w9WgXcQ" -- -i
+udav "https://www.youtube.com/watch?v=dQw4w9WgXcQ" -i
 
 # Custom output directory (overrides smart organization)
-npm run video "https://www.youtube.com/watch?v=dQw4w9WgXcQ" -- -o ./music
+udav "https://www.youtube.com/watch?v=dQw4w9WgXcQ" -o ./music
 
 # Verbose troubleshooting
-npm run video "https://www.youtube.com/watch?v=dQw4w9WgXcQ" -- -v
+udav "https://www.youtube.com/watch?v=dQw4w9WgXcQ" --verbose
 
 # Smart organization examples:
 # This audio file → ~/Downloads/Audio/youtube/Song Title [id].m4a
-npm run audio "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+udav "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
 
 # This video file → ~/Downloads/Video/instagram/Video Title [id].mp4  
-npm run video "https://www.instagram.com/p/example"
+udav "https://www.instagram.com/p/example" -v
 ```
 
 ## Dependencies

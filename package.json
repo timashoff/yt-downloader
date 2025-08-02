@@ -1,26 +1,29 @@
 {
-  "name": "yt-audio-downloader",
+  "name": "universal-downloader",
   "version": "1.0.0",
-  "description": "CLI tool for downloading audio from YouTube videos",
+  "description": "Universal CLI downloader for audio and video from any website",
   "type": "module",
   "main": "src/cli.js",
   "bin": {
-    "yt-audio": "./bin/yt-audio"
+    "udav": "./bin/udav"
   },
   "scripts": {
     "start": "node src/cli.js",
     "audio": "node src/cli.js -a",
-    "video": "node src/cli.js",
+    "video": "node src/cli.js -v",
     "check-dead-code": "npx unimported",
     "lint": "npx eslint src/ --fix",
     "update-ytdlp": "YOUTUBE_DL_SKIP_DOWNLOAD= npm install --force"
   },
   "keywords": [
-    "youtube",
+    "downloader",
+    "universal",
     "audio",
-    "download",
+    "video",
     "cli",
-    "yt-dlp"
+    "yt-dlp",
+    "youtube",
+    "udav"
   ],
   "author": "",
   "license": "MIT",
