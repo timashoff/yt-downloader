@@ -17,11 +17,20 @@ function extractDomain(url) {
     const hostname = new URL(url).hostname;
     // Remove prefixes like www., m., mobile.
     const cleanHostname = hostname.replace(/^(www\.|m\.|mobile\.)/, '');
-    // Extract domain name without extension (.com, .org, .net, etc.)
-    const domain = cleanHostname.split('.')[0];
-    return domain;
+    
+    // Special handling for YouTube domains
+    if (cleanHostname === 'youtu.be' || cleanHostname === 'youtube.com' || cleanHostname.endsWith('.youtube.com')) {
+      return 'youtube';
+    }
+    
+    const parts = cleanHostname.split('.');
+    
+    // Extract main domain name (second-to-last part for subdomains)
+    if (parts.length >= 2) {
+      return parts[parts.length - 2]; // e.g., "spotify" from "open.spotify.com"
+    }
+    return parts[0]; // fallback for single-part domains
   } catch (error) {
-    // Fallback to 'unknown' if URL parsing fails
     return 'unknown';
   }
 }
