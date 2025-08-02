@@ -52,6 +52,18 @@ async function getExpectedFilename(url, options) {
   const { audioOnly, format, quality, outputPath, browser = null } = options;
   
   return new Promise((resolve, reject) => {
+    // Ensure output directory exists before calling yt-dlp
+    fs.access(outputPath, fs.constants.F_OK)
+      .then(() => {
+        // Directory exists, proceed with yt-dlp
+        proceedWithYtDlp();
+      })
+      .catch((error) => {
+        reject(new Error(`Output directory does not exist: ${outputPath}. Error: ${error.message}`));
+      });
+    
+    function proceedWithYtDlp() {
+    
     const ytdlpPath = path.join(process.cwd(), 'node_modules/youtube-dl-exec/bin/yt-dlp');
     
     const args = [
@@ -106,6 +118,7 @@ async function getExpectedFilename(url, options) {
       args.unshift('--cookies-from-browser', browser);
     }
     
+    
     const childProcess = spawn(ytdlpPath, args, {
       stdio: ['ignore', 'pipe', 'pipe']
     });
@@ -144,6 +157,8 @@ async function getExpectedFilename(url, options) {
     childProcess.on('error', (error) => {
       reject(new Error(`Process error getting filename: ${error.message}`));
     });
+    
+    } // end proceedWithYtDlp
   });
 }
 
