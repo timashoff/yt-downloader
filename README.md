@@ -1,5 +1,7 @@
 # Universal Downloader
 
+🌍 **Languages**: [**🇺🇸 English**](README.md) | [🇷🇺 Русский](README.ru.md)
+
 A fast, universal CLI tool for downloading videos and audio from any website including YouTube, video hosting sites, and more.
 
 > **Command name**: `udav` (**U**niversal **D**ownload **A**udio **V**ideo)
