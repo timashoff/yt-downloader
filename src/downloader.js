@@ -8,33 +8,8 @@ import { DEFAULT_CONFIG, YTDLP_OPTIONS, YTDLP_AUDIO_OPTIONS, YTDLP_YOUTUBE_HEADE
 import { isYouTubeUrl } from './validator.js';
 import { logError, logSuccess, logInfo, logProgress, logWarning } from './logger.js';
 
-async function getSystemDownloadsPath() {
-  const downloadsPath = path.join(os.homedir(), 'Downloads');
-  const testFile = path.join(downloadsPath, '.yt-downloader-test');
-  
-  try {
-    // Test with spawned child process (like yt-dlp)
-    await new Promise((resolve, reject) => {
-      const testProcess = spawn('touch', [testFile], {
-        stdio: 'pipe'
-      });
-      testProcess.on('close', (code) => {
-        if (code === 0) resolve();
-        else reject(new Error(`Child process cannot write to Downloads, exit code: ${code}`));
-      });
-      testProcess.on('error', (error) => {
-        reject(new Error(`Child process error: ${error.message}`));
-      });
-    });
-    
-    // Clean up test file
-    await fs.unlink(testFile);
-    return downloadsPath;
-  } catch (error) {
-    logError(`❌ Child process cannot access ~/Downloads: ${error.message}`);
-    logInfo('📁 Using current directory instead: ./downloads');
-    return './downloads';
-  }
+function getSystemDownloadsPath() {
+  return path.join(os.homedir(), 'Downloads');
 }
 
 function extractDomain(url) {
@@ -67,7 +42,7 @@ async function buildOutputPath(url, audioOnly, customOutputDir = null) {
   }
   
   // Otherwise, use smart organization
-  const downloadsPath = await getSystemDownloadsPath();
+  const downloadsPath = getSystemDownloadsPath();
   const contentType = audioOnly ? 'Audio' : 'Video';
   const domain = extractDomain(url);
   return path.join(downloadsPath, contentType, domain);
@@ -500,13 +475,13 @@ export async function downloadVideo(url, options = {}) {
     logInfo(`📁 Output directory: ${fullOutputPath}`);
   }
   
-  // Check cookie access for YouTube URLs on macOS
-  if (isYouTubeUrl(url) && process.platform === 'darwin') {
+  // Check cookie access for YouTube URLs on macOS (diagnostic info)
+  if (isYouTubeUrl(url) && process.platform === 'darwin' && verbose) {
     const defaultBrowser = browser || 'safari';
     const hasCookieAccess = await checkCookieAccess(defaultBrowser);
     
-    if (!hasCookieAccess && verbose) {
-      logWarning(`⚠️  No access to ${defaultBrowser} cookies - may need Full Disk Access for better YouTube support`);
+    if (!hasCookieAccess) {
+      logWarning(`⚠️  No access to ${defaultBrowser} cookies - may need Full Disk Access for YouTube`);
     }
   }
   
