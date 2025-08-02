@@ -55,6 +55,23 @@ sudo apt install ffmpeg  # Ubuntu/Debian
 sudo yum install ffmpeg  # CentOS/RHEL
 ```
 
+#### macOS Full Disk Access (для YouTube)
+
+Для надежной работы с YouTube на macOS требуется Full Disk Access для доступа к cookies браузера:
+
+1. **Откройте System Settings** (System Preferences на старых версиях)
+2. **Перейдите в Privacy & Security → Full Disk Access**
+3. **Нажмите кнопку "+" и добавьте:**
+   - **Terminal.app** (если используете Terminal)
+   - **iTerm.app** (если используете iTerm)
+4. **Перезапустите терминал**
+
+**Почему это нужно?**
+- YouTube блокирует запросы без cookies как ботов
+- macOS защищает файлы cookies браузеров
+- Full Disk Access позволяет yt-dlp читать cookies Safari/Chrome
+- Без этого могут быть ошибки "Sign in to confirm you're not a bot"
+
 ## Usage
 
 ### Basic Usage
@@ -165,14 +182,24 @@ This tool automatically selects the best download method for each site:
 
 YouTube blocks unauthenticated downloads. Solutions:
 
-1. **Use browser cookies** (recommended):
+#### macOS Users
+1. **Enable Full Disk Access** (Most important):
+   - System Settings → Privacy & Security → Full Disk Access
+   - Add Terminal.app or iTerm.app
+   - Restart terminal
+   
+2. **Use browser cookies** (after FDA is enabled):
    ```bash
+   npm run video "URL" -- -b safari  # Recommended for macOS
    npm run video "URL" -- -b chrome
    ```
 
-2. **Make sure you're logged into YouTube** in the specified browser
+#### All Platforms
+1. **Make sure you're logged into YouTube** in the specified browser
+2. **Try different browsers**: `-b safari`, `-b firefox`, `-b edge`
+3. **Error persists?** The app will try fallback methods automatically
 
-3. **Try different browsers**: `-b safari`, `-b firefox`, `-b edge`
+**Note**: Without Full Disk Access on macOS, the app cannot read browser cookies, causing YouTube to block downloads as bot activity.
 
 ### Slow Downloads
 

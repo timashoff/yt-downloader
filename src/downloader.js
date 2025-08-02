@@ -13,12 +13,25 @@ async function getSystemDownloadsPath() {
   const testFile = path.join(downloadsPath, '.yt-downloader-test');
   
   try {
-    // Try to actually write a test file
-    await fs.writeFile(testFile, '');
-    await fs.unlink(testFile); // Clean up
+    // Test with spawned child process (like yt-dlp)
+    await new Promise((resolve, reject) => {
+      const testProcess = spawn('touch', [testFile], {
+        stdio: 'pipe'
+      });
+      testProcess.on('close', (code) => {
+        if (code === 0) resolve();
+        else reject(new Error(`Child process cannot write to Downloads, exit code: ${code}`));
+      });
+      testProcess.on('error', (error) => {
+        reject(new Error(`Child process error: ${error.message}`));
+      });
+    });
+    
+    // Clean up test file
+    await fs.unlink(testFile);
     return downloadsPath;
-  } catch {
-    logError('❌ No write access to ~/Downloads folder');
+  } catch (error) {
+    logError(`❌ Child process cannot access ~/Downloads: ${error.message}`);
     logInfo('📁 Using current directory instead: ./downloads');
     return './downloads';
   }
@@ -146,10 +159,21 @@ async function getExpectedFilename(url, options) {
         
         resolve(filename);
       } else {
-        const error = new Error(`Failed to get filename: ${stderr}`);
+        // Create more specific error messages for better handling
+        let errorMessage = `Failed to get filename: ${stderr}`;
+        
+        // Check for specific error patterns and preserve original error text
+        if (stderr.includes('Sign in to confirm') || stderr.includes('bot')) {
+          errorMessage = stderr; // Preserve original error for detection in main catch block
+        } else if (stderr.includes('cookies') || stderr.includes('authentication')) {
+          errorMessage = `Cookie access error: ${stderr}`;
+        }
+        
+        const error = new Error(errorMessage);
         error.stdout = stdout;
         error.stderr = stderr;
         error.exitCode = code;
+        error.isFilenameError = true;
         reject(error);
       }
     });
@@ -168,6 +192,29 @@ async function checkFileExists(filePath) {
     return false;
   }
 }
+
+async function checkCookieAccess(browser = 'safari') {
+  if (process.platform !== 'darwin') {
+    return true; // Assume other platforms are OK
+  }
+  
+  const cookiePaths = {
+    safari: path.join(os.homedir(), 'Library/Cookies/Cookies.binarycookies'),
+    chrome: path.join(os.homedir(), 'Library/Application Support/Google/Chrome/Default/Cookies'),
+    firefox: path.join(os.homedir(), 'Library/Application Support/Firefox/Profiles')
+  };
+  
+  const cookiePath = cookiePaths[browser];
+  if (!cookiePath) return false;
+  
+  try {
+    await fs.access(cookiePath);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 
 async function callYtDlpDirectly(url, options, progressCallback = null) {
   const { audioOnly, format, quality, outputPath, cookiesFromBrowser, verbose } = options;
@@ -453,15 +500,28 @@ export async function downloadVideo(url, options = {}) {
     logInfo(`📁 Output directory: ${fullOutputPath}`);
   }
   
+  // Check cookie access for YouTube URLs on macOS
+  if (isYouTubeUrl(url) && process.platform === 'darwin') {
+    const defaultBrowser = browser || 'safari';
+    const hasCookieAccess = await checkCookieAccess(defaultBrowser);
+    
+    if (!hasCookieAccess && verbose) {
+      logWarning(`⚠️  No access to ${defaultBrowser} cookies - may need Full Disk Access for better YouTube support`);
+    }
+  }
+  
   if (!(await createOutputDirectory(fullOutputPath))) {
     throw new Error(ERROR_MESSAGES.DIRECTORY_ERROR);
   }
 
-  // 1. Get expected filename BEFORE downloading
+  // 1. Try to get expected filename BEFORE downloading (with fallback)
+  let expectedFilename = null;
+  let skipFileCheck = false;
+  
   try {
     logProgress('Checking if file already exists...');
     
-    const expectedFilename = await getExpectedFilename(url, {
+    expectedFilename = await getExpectedFilename(url, {
       audioOnly,
       format, 
       quality,
@@ -483,10 +543,25 @@ export async function downloadVideo(url, options = {}) {
         skipped: true
       };
     }
-    
-    // 3. File doesn't exist, proceed with download
-    logProgress('Starting download...');
-    
+  } catch (filenameError) {
+    // If filename detection fails due to access issues, continue with download
+    if (filenameError.isFilenameError && (
+        filenameError.message.includes('Sign in to confirm') ||
+        filenameError.message.includes('bot') ||
+        filenameError.message.includes('Cookie access error')
+      )) {
+      logWarning('⚠️  Cannot check if file exists (access issues), proceeding with download...');
+      skipFileCheck = true;
+    } else {
+      // Re-throw other errors
+      throw filenameError;
+    }
+  }
+  
+  // 3. Proceed with download
+  logProgress(skipFileCheck ? 'Starting download (cannot check file existence)...' : 'Starting download...');
+  
+  try {
     const progressBar = new cliProgress.SingleBar({
       format: 'Download |{bar}| {percentage}% | {value}/{total} | {filename}',
       barCompleteChar: '\u2588',
@@ -618,8 +693,12 @@ export async function downloadVideo(url, options = {}) {
 
     logSuccess(SUCCESS_MESSAGES.DOWNLOAD_COMPLETE);
     
-    // Show the downloaded file (we know the exact filename)
-    console.log(expectedFilename);
+    // Show the downloaded file (if we know the exact filename)
+    if (expectedFilename) {
+      console.log(expectedFilename);
+    } else {
+      console.log('File downloaded (filename detection was skipped)');
+    }
     
     if (verbose) {
       logInfo(`Folder: ${fullOutputPath}`);
@@ -631,7 +710,7 @@ export async function downloadVideo(url, options = {}) {
     return {
       success: true,
       outputPath: fullOutputPath,
-      filename: expectedFilename,
+      filename: expectedFilename || 'Downloaded file',
       result
     };
 
@@ -656,10 +735,14 @@ export async function downloadVideo(url, options = {}) {
         errorMessage.includes('bot') || 
         errorMessage.includes('Failed to extract any player response')) {
       logError(ERROR_MESSAGES.YOUTUBE_BOT_DETECTION);
-      logInfo('💡 Solution:');
-      logInfo('   1. npm start -- "URL" -b safari');
-      logInfo('   2. Or: node src/cli.js "URL" -b safari');
-      logInfo('   3. Make sure you are logged into YouTube in browser');
+      logInfo('💡 Solutions:');
+      logInfo('   🍎 macOS users: Enable Full Disk Access for Terminal/iTerm');
+      logInfo('      1. System Settings → Privacy & Security → Full Disk Access');
+      logInfo('      2. Add Terminal.app or iTerm.app');
+      logInfo('      3. Restart terminal and try again');
+      logInfo('   🌐 Alternative: Try with browser cookies:');
+      logInfo('      npm start -- "URL" -b safari');
+      logInfo('   ⚠️  Make sure you are logged into YouTube in browser');
     } else if (errorMessage.includes('ffmpeg') || errorMessage.includes('ffprobe')) {
       logError(ERROR_MESSAGES.FFMPEG_NOT_FOUND);
       logInfo('💡 FFmpeg Installation:');

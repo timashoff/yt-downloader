@@ -62,3 +62,4 @@ export async function validateBrowser(browser) {
   const { DEFAULT_CONFIG } = await import('./constants.js');
   return DEFAULT_CONFIG.SUPPORTED_BROWSERS.includes(browser.toLowerCase());
 }
+
