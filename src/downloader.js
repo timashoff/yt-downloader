@@ -10,9 +10,12 @@ import { logError, logSuccess, logInfo, logProgress, logWarning } from './logger
 
 async function getSystemDownloadsPath() {
   const downloadsPath = path.join(os.homedir(), 'Downloads');
+  const testFile = path.join(downloadsPath, '.yt-downloader-test');
   
   try {
-    await fs.access(downloadsPath, fs.constants.W_OK);
+    // Try to actually write a test file
+    await fs.writeFile(testFile, '');
+    await fs.unlink(testFile); // Clean up
     return downloadsPath;
   } catch {
     logError('❌ No write access to ~/Downloads folder');
