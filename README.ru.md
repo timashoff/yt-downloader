@@ -153,8 +153,8 @@ npm run video "URL" -- -o ./downloads
 │   │   └── Another Song [video_id].m4a
 │   ├── soundcloud/
 │   │   └── Track Name [track_id].m4a
-│   └── spotify/
-│       └── Artist - Song.m4a
+│   └── instagram/
+│       └── Audio File [id].m4a
 └── Video/
     ├── youtube/
     │   ├── Video Title [video_id].mp4

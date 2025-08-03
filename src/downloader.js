@@ -27,7 +27,7 @@ function extractDomain(url) {
     
     // Extract main domain name (second-to-last part for subdomains)
     if (parts.length >= 2) {
-      return parts[parts.length - 2]; // e.g., "spotify" from "open.spotify.com"
+      return parts[parts.length - 2]; // e.g., "instagram" from "www.instagram.com"
     }
     return parts[0]; // fallback for single-part domains
   } catch (error) {
@@ -37,11 +37,11 @@ function extractDomain(url) {
 
 async function buildOutputPath(url, audioOnly, customOutputDir = null) {
   // If custom output directory is specified, use it
-  if (customOutputDir && customOutputDir !== DEFAULT_CONFIG.OUTPUT_DIR) {
+  if (customOutputDir) {
     return path.resolve(customOutputDir);
   }
   
-  // Otherwise, use smart organization
+  // Default: smart organization in system Downloads folder
   const downloadsPath = getSystemDownloadsPath();
   const contentType = audioOnly ? 'Audio' : 'Video';
   const domain = extractDomain(url);
@@ -134,15 +134,8 @@ async function getExpectedFilename(url, options) {
         
         resolve(filename);
       } else {
-        // Create more specific error messages for better handling
-        let errorMessage = `Failed to get filename: ${stderr}`;
-        
-        // Check for specific error patterns and preserve original error text
-        if (stderr.includes('Sign in to confirm') || stderr.includes('bot')) {
-          errorMessage = stderr; // Preserve original error for detection in main catch block
-        } else if (stderr.includes('cookies') || stderr.includes('authentication')) {
-          errorMessage = `Cookie access error: ${stderr}`;
-        }
+        // Create error message with original stderr for logging
+        const errorMessage = `Failed to get filename: ${stderr}`;
         
         const error = new Error(errorMessage);
         error.stdout = stdout;
@@ -168,27 +161,6 @@ async function checkFileExists(filePath) {
   }
 }
 
-async function checkCookieAccess(browser = 'safari') {
-  if (process.platform !== 'darwin') {
-    return true; // Assume other platforms are OK
-  }
-  
-  const cookiePaths = {
-    safari: path.join(os.homedir(), 'Library/Cookies/Cookies.binarycookies'),
-    chrome: path.join(os.homedir(), 'Library/Application Support/Google/Chrome/Default/Cookies'),
-    firefox: path.join(os.homedir(), 'Library/Application Support/Firefox/Profiles')
-  };
-  
-  const cookiePath = cookiePaths[browser];
-  if (!cookiePath) return false;
-  
-  try {
-    await fs.access(cookiePath);
-    return true;
-  } catch {
-    return false;
-  }
-}
 
 
 async function callYtDlpDirectly(url, options, progressCallback = null) {
@@ -445,7 +417,7 @@ export async function createOutputDirectory(outputDir) {
 
 export async function downloadVideo(url, options = {}) {
   const {
-    outputDir = DEFAULT_CONFIG.OUTPUT_DIR,
+    outputDir = null,
     format = DEFAULT_CONFIG.AUDIO_FORMAT,
     browser = null,
     cookiesFile = null,
@@ -475,15 +447,6 @@ export async function downloadVideo(url, options = {}) {
     logInfo(`📁 Output directory: ${fullOutputPath}`);
   }
   
-  // Check cookie access for YouTube URLs on macOS (diagnostic info)
-  if (isYouTubeUrl(url) && process.platform === 'darwin' && verbose) {
-    const defaultBrowser = browser || 'safari';
-    const hasCookieAccess = await checkCookieAccess(defaultBrowser);
-    
-    if (!hasCookieAccess) {
-      logWarning(`⚠️  No access to ${defaultBrowser} cookies - may need Full Disk Access for YouTube`);
-    }
-  }
   
   if (!(await createOutputDirectory(fullOutputPath))) {
     throw new Error(ERROR_MESSAGES.DIRECTORY_ERROR);
@@ -519,16 +482,17 @@ export async function downloadVideo(url, options = {}) {
       };
     }
   } catch (filenameError) {
-    // If filename detection fails due to access issues, continue with download
-    if (filenameError.isFilenameError && (
-        filenameError.message.includes('Sign in to confirm') ||
-        filenameError.message.includes('bot') ||
-        filenameError.message.includes('Cookie access error')
-      )) {
-      logWarning('⚠️  Cannot check if file exists (access issues), proceeding with download...');
+    // For filename detection errors, always continue with download
+    // This prevents crashes due to cookie access issues without FDA
+    if (filenameError.isFilenameError) {
+      if (verbose) {
+        logWarning(`⚠️  Cannot check file existence: ${filenameError.message.substring(0, 100)}...`);
+      } else {
+        logWarning('⚠️  Cannot check if file exists, proceeding with download...');
+      }
       skipFileCheck = true;
     } else {
-      // Re-throw other errors
+      // Only re-throw if it's not a filename detection error
       throw filenameError;
     }
   }
@@ -711,12 +675,17 @@ export async function downloadVideo(url, options = {}) {
         errorMessage.includes('Failed to extract any player response')) {
       logError(ERROR_MESSAGES.YOUTUBE_BOT_DETECTION);
       logInfo('💡 Solutions:');
-      logInfo('   🍎 macOS users: Enable Full Disk Access for Terminal/iTerm');
-      logInfo('      1. System Settings → Privacy & Security → Full Disk Access');
-      logInfo('      2. Add Terminal.app or iTerm.app');
-      logInfo('      3. Restart terminal and try again');
-      logInfo('   🌐 Alternative: Try with browser cookies:');
-      logInfo('      npm start -- "URL" -b safari');
+      if (process.platform === 'darwin') {
+        logInfo('   🍎 macOS: Enable Full Disk Access for Terminal/iTerm');
+        logInfo('      1. System Settings → Privacy & Security → Full Disk Access');
+        logInfo('      2. Add Terminal.app or iTerm.app');
+        logInfo('      3. Restart terminal and try again');
+        logInfo('   🌐 Alternative: Try with browser cookies:');
+        logInfo('      udav "URL" -b safari');
+      } else {
+        logInfo('   🌐 Try with browser cookies:');
+        logInfo('      udav "URL" -b chrome');
+      }
       logInfo('   ⚠️  Make sure you are logged into YouTube in browser');
     } else if (errorMessage.includes('ffmpeg') || errorMessage.includes('ffprobe')) {
       logError(ERROR_MESSAGES.FFMPEG_NOT_FOUND);

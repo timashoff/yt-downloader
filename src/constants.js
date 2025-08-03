@@ -1,5 +1,4 @@
 export const DEFAULT_CONFIG = {
-  OUTPUT_DIR: './downloads',
   VIDEO_QUALITY: 'best',
   AUDIO_FORMAT: 'm4a',
   AUDIO_QUALITY: 'best',
