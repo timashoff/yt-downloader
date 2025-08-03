@@ -2,11 +2,11 @@ import youtubedl from 'youtube-dl-exec';
 import path from 'path';
 import fs from 'fs/promises';
 import os from 'os';
-import cliProgress from 'cli-progress';
 import { spawn } from 'child_process';
 import { DEFAULT_CONFIG, YTDLP_OPTIONS, YTDLP_AUDIO_OPTIONS, YTDLP_YOUTUBE_HEADERS, ERROR_MESSAGES, SUCCESS_MESSAGES, UI_CONSTANTS, HTTP_HEADERS } from './constants.js';
 import { isYouTubeUrl } from './validator.js';
 import { logError, logSuccess, logInfo, logProgress, logWarning } from './logger.js';
+import { spinner } from './spinner.js';
 
 function getSystemDownloadsPath() {
   return path.join(os.homedir(), 'Downloads');
@@ -163,8 +163,8 @@ async function checkFileExists(filePath) {
 
 
 
-async function callYtDlpDirectly(url, options, progressCallback = null) {
-  const { audioOnly, format, quality, outputPath, cookiesFromBrowser, verbose } = options;
+async function callYtDlpDirectly(url, options) {
+  const { audioOnly, format, quality, outputPath, cookiesFromBrowser, verbose, useDownloadSpinner = false } = options;
   return new Promise((resolve, reject) => {
     const ytdlpPath = path.join(process.cwd(), 'node_modules/youtube-dl-exec/bin/yt-dlp');
     
@@ -235,6 +235,23 @@ async function callYtDlpDirectly(url, options, progressCallback = null) {
       console.log('🔍 Audio mode:', audioOnly);
     }
     
+    let stdout = '';
+    let stderr = '';
+    let videoTitle = '';
+    let finalFilename = '';
+    let isAlreadyDownloaded = false;
+    let isConverting = false;
+    let isKilled = false;
+    let lastProgressTime = Date.now();
+    let accumulatedStdout = ''; // For multiline parsing
+    let downloadStartTime = null; // Track download start time
+    
+    // Start download spinner if needed
+    if (useDownloadSpinner) {
+      downloadStartTime = Date.now();
+      spinner.start('Starting download...');
+    }
+    
     const childProcess = spawn(ytdlpPath, args, {
       stdio: ['ignore', 'pipe', 'pipe']
     });
@@ -245,12 +262,6 @@ async function callYtDlpDirectly(url, options, progressCallback = null) {
         console.log('🔍 yt-dlp process spawned successfully');
       }
     });
-    
-    let stdout = '';
-    let stderr = '';
-    let videoTitle = '';
-    let isKilled = false;
-    let lastProgressTime = Date.now();
     
     // Dynamic timeout - reset on progress, kill if no activity for 60 seconds
     let timeout = setTimeout(() => {
@@ -294,8 +305,51 @@ async function callYtDlpDirectly(url, options, progressCallback = null) {
     };
     
     childProcess.stdout.on('data', (data) => {
-      stdout += data.toString();
+      const chunk = data.toString();
+      stdout += chunk;
+      accumulatedStdout += chunk;
       resetTimeout(); // Reset timeout on any stdout activity
+      
+      if (useDownloadSpinner) {
+        // Parse already downloaded files
+        if (accumulatedStdout.includes('has already been downloaded')) {
+          isAlreadyDownloaded = true;
+          const alreadyMatch = accumulatedStdout.match(/\/([^/]+)\s+has already been downloaded/);
+          if (alreadyMatch) {
+            finalFilename = alreadyMatch[1];
+          }
+        }
+        
+        // Parse video title and final filename from Destination path using accumulated data
+        const destinationMatch = accumulatedStdout.match(/\[download\] Destination: (.+?)(?=\n|$)/);
+        if (destinationMatch && !videoTitle) {
+          const fullPath = destinationMatch[1].trim();
+          finalFilename = fullPath.split('/').pop();
+          videoTitle = finalFilename.replace(/\s+\[[^\]]+\]\.[^.]+$/, '');
+          
+          spinner.updateMessage(`Downloading "${videoTitle}"...`);
+        }
+        
+        // Parse download progress from current chunk
+        const progressMatch = chunk.match(/\[download\]\s+(\d+(?:\.\d+)?)%/);
+        if (progressMatch && !isConverting) {
+          const percent = parseFloat(progressMatch[1]);
+          spinner.updateProgress(percent);
+        }
+        
+        // Parse ExtractAudio stage and final audio filename
+        if (chunk.includes('[ExtractAudio]')) {
+          isConverting = true;
+          spinner.updateMessage('Converting to audio...');
+          spinner.updateProgress(null);
+          
+          // Update final filename for audio files using accumulated data
+          const audioDestMatch = accumulatedStdout.match(/\[ExtractAudio\] Destination: (.+?)(?=\n|$)/);
+          if (audioDestMatch) {
+            finalFilename = audioDestMatch[1].trim().split('/').pop();
+          }
+        }
+      }
     });
     
     childProcess.stderr.on('data', (data) => {
@@ -303,33 +357,17 @@ async function callYtDlpDirectly(url, options, progressCallback = null) {
       stderr += chunk;
       resetTimeout(); // Reset timeout on any stderr activity
       
-      // Parse video title from Destination path
-      const destinationMatch = chunk.match(/\[download\] Destination: .+\/(.+?)\.[^.]+$/);
-      if (destinationMatch && !videoTitle) {
-        // Remove ID in square brackets from end of title
-        videoTitle = destinationMatch[1].replace(/ \[[^\]]+\]$/, '');
-        if (progressCallback) {
-          progressCallback({ type: 'title', title: videoTitle });
-        }
-      }
-      
-      // Parse download progress
-      const progressMatch = chunk.match(/\[download\]\s+(\d+\.\d+)%/);
-      if (progressMatch && progressCallback) {
-        const percent = parseFloat(progressMatch[1]);
-        progressCallback({ type: 'progress', percent });
-      }
-      
-      // Parse conversion stage
-      if (chunk.includes('[ExtractAudio]') && progressCallback) {
-        progressCallback({ type: 'convert' });
-      }
+      // stderr is mainly for warnings and errors in yt-dlp
+      // Progress info is now parsed from stdout
     });
     
     childProcess.on('close', (code) => {
       clearTimeout(timeout); // Clear timeout if process completes normally
       
       if (isKilled) {
+        if (useDownloadSpinner) {
+          spinner.stop(false, 'Download timed out');
+        }
         const error = new Error('Process timed out after 60 seconds of no activity');
         error.stdout = stdout;
         error.stderr = stderr;
@@ -340,6 +378,24 @@ async function callYtDlpDirectly(url, options, progressCallback = null) {
       }
       
       if (code === UI_CONSTANTS.EXIT_CODE_SUCCESS) {
+        if (useDownloadSpinner) {
+          // Calculate download time
+          const downloadTime = downloadStartTime ? ((Date.now() - downloadStartTime) / 1000).toFixed(1) : '0.0';
+          
+          // Smart final message - time shown by spinner.stop(), only show filename
+          let finalMessage = 'Download completed!';
+          
+          if (isAlreadyDownloaded && finalFilename) {
+            finalMessage = `"${finalFilename}" (already exists)`;
+          } else if (finalFilename) {
+            finalMessage = `"${finalFilename}"`;
+          } else {
+            finalMessage = 'Download completed!';
+          }
+          
+          spinner.stop(true, finalMessage);
+        }
+        
         // Log successful completion
         if (verbose) {
           logInfo('yt-dlp completed successfully');
@@ -349,8 +405,12 @@ async function callYtDlpDirectly(url, options, progressCallback = null) {
             logInfo('--- End of output ---');
           }
         }
-        resolve({ success: true, stdout, stderr });
+        resolve({ success: true, stdout, stderr, finalFilename });
       } else {
+        if (useDownloadSpinner) {
+          spinner.stop(false, 'Download failed');
+        }
+        
         const error = new Error(`yt-dlp failed with exit code ${code}`);
         error.stdout = stdout;
         error.stderr = stderr;
@@ -368,27 +428,25 @@ async function callYtDlpDirectly(url, options, progressCallback = null) {
   });
 }
 
-async function tryDownloadWithBrowser(url, downloadOptions, browser, progressCallback = null) {
+async function tryDownloadWithBrowser(url, downloadOptions, browser, useDownloadSpinner = false) {
   try {
-    logInfo(`Trying cookies from ${browser}...`);
     const callOptions = {
       audioOnly: downloadOptions.audioOnly,
       format: downloadOptions.format,  // Audio format (m4a, mp3, etc.)
       quality: downloadOptions.quality, // Video/Audio quality (best, 720p, etc.)
       outputPath: path.dirname(downloadOptions.output),
       cookiesFromBrowser: browser,
-      verbose: downloadOptions.verbose
+      verbose: downloadOptions.verbose,
+      useDownloadSpinner
     };
     
     // Debug logging only in verbose mode
     if (downloadOptions.verbose) {
       console.log('🔍 tryDownloadWithBrowser callOptions:', callOptions);
     }
-    const result = await callYtDlpDirectly(url, callOptions, progressCallback);
-    logSuccess(`Works with ${browser}!`);
+    const result = await callYtDlpDirectly(url, callOptions);
     return { success: true, result, browser };
   } catch (error) {
-    logWarning(`❌ ${browser} doesn't work`);
     if (downloadOptions.verbose) {
       logError(`Error details for ${browser}:`, error);
       logError('Full yt-dlp error:', error.message);
@@ -452,106 +510,43 @@ export async function downloadVideo(url, options = {}) {
     throw new Error(ERROR_MESSAGES.DIRECTORY_ERROR);
   }
 
-  // 1. Try to get expected filename BEFORE downloading (with fallback)
+  // 1. Quick file existence check (skip slow yt-dlp filename detection)
   let expectedFilename = null;
-  let skipFileCheck = false;
+  let skipFileCheck = true; // For now, skip the slow pre-check
   
-  try {
-    logProgress('Checking if file already exists...');
-    
-    expectedFilename = await getExpectedFilename(url, {
-      audioOnly,
-      format, 
-      quality,
-      outputPath: fullOutputPath,
-      browser: browser || 'safari' // Default to safari for filename detection
-    });
-    
-    const fullFilePath = path.join(fullOutputPath, expectedFilename);
-    
-    // 2. Check if file already exists
-    const fileExists = await checkFileExists(fullFilePath);
-    
-    if (fileExists) {
-      logInfo(`File already exists: ${expectedFilename}`);
-      return {
-        success: true,
-        outputPath: fullOutputPath,
-        filename: expectedFilename,
-        skipped: true
-      };
-    }
-  } catch (filenameError) {
-    // For filename detection errors, always continue with download
-    // This prevents crashes due to cookie access issues without FDA
-    if (filenameError.isFilenameError) {
-      if (verbose) {
-        logWarning(`⚠️  Cannot check file existence: ${filenameError.message.substring(0, 100)}...`);
-      } else {
-        logWarning('⚠️  Cannot check if file exists, proceeding with download...');
-      }
-      skipFileCheck = true;
-    } else {
-      // Only re-throw if it's not a filename detection error
-      throw filenameError;
-    }
+  if (verbose) {
+    logInfo('⏩ Skipping file check for faster startup');
   }
   
-  // 3. Proceed with download
-  logProgress(skipFileCheck ? 'Starting download (cannot check file existence)...' : 'Starting download...');
-  
+  // 3. Start with browser connection phase
+  const downloadOptions = {
+    audioOnly: audioOnly,
+    format: format,
+    quality: quality,
+    output: path.join(fullOutputPath, '%(title)s.%(ext)s'),
+    verbose
+  };
+
+  let result;
+  let successfulBrowser = null;
+  let currentVideoTitle = '';
+
   try {
-    const progressBar = new cliProgress.SingleBar({
-      format: 'Download |{bar}| {percentage}% | {value}/{total} | {filename}',
-      barCompleteChar: '\u2588',
-      barIncompleteChar: '\u2591',
-      hideCursor: true
-    });
-
-    let progressStarted = false;
-
-    const downloadOptions = {
-      audioOnly: audioOnly,
-      format: format,
-      quality: quality,
-      output: path.join(fullOutputPath, '%(title)s.%(ext)s'),
-      verbose
-    };
-
-    let result;
-    let successfulBrowser = null;
-    let currentVideoTitle = '';
-    
-    // Callback for progress handling
-    const handleProgress = (data) => {
-      if (data.type === 'title') {
-        currentVideoTitle = data.title;
-        logInfo(`🎥 ${data.title}`);
-        progressBar.start(UI_CONSTANTS.PROGRESS_MAX, UI_CONSTANTS.PROGRESS_MIN, { 
-          filename: 'Detecting video...' 
-        });
-        progressStarted = true;
-      } else if (data.type === 'progress') {
-        if (progressStarted) {
-          progressBar.update(Math.round(data.percent), { 
-            filename: 'Downloading...' 
-          });
-        }
-      } else if (data.type === 'convert') {
-        if (progressStarted) {
-          progressBar.update(UI_CONSTANTS.PROGRESS_MAX, { 
-            filename: 'Converting to audio...' 
-          });
-        }
-      }
-    };
-
     if (cookiesFile) {
       downloadOptions.cookies = cookiesFile;
       logInfo(`Using cookies from file: ${cookiesFile}`);
-      result = await youtubedl(url, downloadOptions, {
-        stdio: ['ignore', 'pipe', 'pipe']
-      });
+      
+      // Start download spinner
+      spinner.start('Starting download...');
+      try {
+        result = await youtubedl(url, downloadOptions, {
+          stdio: ['ignore', 'pipe', 'pipe']
+        });
+        spinner.stop(true, 'Download completed!');
+      } catch (error) {
+        spinner.stop(false, 'Download failed');
+        throw error;
+      }
     } else {
       // Only use browser cookies for YouTube
       if (isYouTubeUrl(url)) {
@@ -559,42 +554,44 @@ export async function downloadVideo(url, options = {}) {
           ? [browser, ...DEFAULT_CONFIG.BROWSER_FALLBACK_ORDER.filter(b => b !== browser)]
           : DEFAULT_CONFIG.BROWSER_FALLBACK_ORDER;
 
-        logInfo('Trying to find working cookies...');
-      
-      // Try browsers in order
-      for (const browserToTry of browsersToTry) {
-        const attempt = await tryDownloadWithBrowser(url, downloadOptions, browserToTry, handleProgress);
-        if (attempt.success) {
-          result = attempt.result;
-          successfulBrowser = attempt.browser;
-          break;
+        // Try browsers with download progress
+        
+        // Try browsers in order
+        for (const browserToTry of browsersToTry) {
+          spinner.updateMessage(`Trying ${browserToTry} cookies...`);
+          const attempt = await tryDownloadWithBrowser(url, downloadOptions, browserToTry, true); // Download with progress
+          if (attempt.success) {
+            result = attempt.result;
+            successfulBrowser = attempt.browser;
+            break;
+          }
         }
-      }
 
-      // If all browsers fail, try WITHOUT cookies
-      if (!result) {
-        logInfo('Trying to download WITHOUT cookies...');
-        try {
-          const callOptions = {
-            audioOnly: downloadOptions.audioOnly,
-            format: downloadOptions.format,
-            quality: downloadOptions.quality,
-            outputPath: path.dirname(downloadOptions.output),
-            cookiesFromBrowser: null,
-            verbose: downloadOptions.verbose
-          };
-          result = await callYtDlpDirectly(url, callOptions, handleProgress);
-          logSuccess('Works WITHOUT cookies!');
-        } catch (error) {
-          logError('Full error WITHOUT cookies:', error.message);
-          logError('Stderr:', error.stderr);
-          logError('Stdout:', error.stdout);
-          throw new Error('Failed to download even without cookies');
+        // If all browsers fail, try WITHOUT cookies
+        if (!result) {
+          spinner.updateMessage('Trying without cookies...');
+          try {
+            const callOptions = {
+              audioOnly: downloadOptions.audioOnly,
+              format: downloadOptions.format,
+              quality: downloadOptions.quality,
+              outputPath: path.dirname(downloadOptions.output),
+              cookiesFromBrowser: null,
+              verbose: downloadOptions.verbose,
+              useDownloadSpinner: true
+            };
+            result = await callYtDlpDirectly(url, callOptions);
+          } catch (error) {
+            spinner.stop(false, 'Connection failed');
+            logError('Full error WITHOUT cookies:', error.message);
+            logError('Stderr:', error.stderr);
+            logError('Stdout:', error.stdout);
+            throw new Error('Failed to download even without cookies');
+          }
         }
-      }
       } else {
         // For non-YouTube sites, try direct download without cookies
-        logInfo('Downloading from non-YouTube site...');
+        spinner.start('Connecting to site...');
         try {
           const callOptions = {
             audioOnly: downloadOptions.audioOnly,
@@ -602,11 +599,12 @@ export async function downloadVideo(url, options = {}) {
             quality: downloadOptions.quality,
             outputPath: path.dirname(downloadOptions.output),
             cookiesFromBrowser: null,
-            verbose: downloadOptions.verbose
+            verbose: downloadOptions.verbose,
+            useDownloadSpinner: true
           };
-          result = await callYtDlpDirectly(url, callOptions, handleProgress);
-          logSuccess('Download successful!');
+          result = await callYtDlpDirectly(url, callOptions);
         } catch (error) {
+          spinner.stop(false, 'Connection failed');
           if (error.timeout) {
             logError('Download timed out after 60 seconds of no activity - site may be unresponsive or blocked');
           } else {
@@ -625,24 +623,14 @@ export async function downloadVideo(url, options = {}) {
       }
     }
 
-    if (progressStarted) {
-      progressBar.update(UI_CONSTANTS.PROGRESS_MAX, { filename: 'Completed!' });
-      progressBar.stop();
-    }
-
-    logSuccess(SUCCESS_MESSAGES.DOWNLOAD_COMPLETE);
-    
-    // Show the downloaded file (if we know the exact filename)
-    if (expectedFilename) {
-      console.log(expectedFilename);
-    } else {
-      console.log('File downloaded (filename detection was skipped)');
-    }
-    
+    // Show additional info only in verbose mode
     if (verbose) {
       logInfo(`Folder: ${fullOutputPath}`);
       if (successfulBrowser) {
         logInfo(`Cookies: ${successfulBrowser}`);
+      }
+      if (expectedFilename) {
+        logInfo(`File: ${expectedFilename}`);
       }
     }
 
@@ -656,16 +644,16 @@ export async function downloadVideo(url, options = {}) {
   } catch (error) {
     // Handle filename detection errors  
     if (error.message && error.message.includes('Failed to get filename')) {
-      logError('Unable to get video information. Check URL and try again.');
+      spinner.stop(false, 'Unable to get video information');
       return {
         success: false,
         error: error.message
       };
     }
     
-    // Handle download errors
-    if (progressStarted) {
-      progressBar.stop();
+    // Handle download errors (spinner may already be stopped by callYtDlpDirectly)
+    if (spinner.isRunning()) {
+      spinner.stop(false, 'Download failed');
     }
     
     const errorMessage = error.message || error.toString();

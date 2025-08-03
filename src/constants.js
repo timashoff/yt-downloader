@@ -92,3 +92,16 @@ export const YTDLP_YOUTUBE_HEADERS = {
     'upgrade-insecure-requests:1'
   ]
 };
+
+export const UI_SYMBOLS = {
+  SPINNER: ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'],
+  CHECK: '✓',
+  CROSS: '☓',
+  ARROW: '▶',
+  DOT: '•',
+  ELLIPSIS: '...',
+};
+
+export const SPINNER_CONSTANTS = {
+  INTERVAL: 100, // Spinner update interval in ms
+};
