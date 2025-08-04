@@ -47,7 +47,8 @@ export class SpinnerManager {
    */
   start(message = 'Loading...') {
     if (this.isActive) {
-      this.stop(false, 'Interrupted');
+      // Just cleanup without showing "Interrupted" message
+      this.cleanup();
     }
 
     this.isActive = true;
@@ -135,6 +136,7 @@ export class SpinnerManager {
       this.interval = null;
     }
     this.isActive = false;
+    this.startTime = null;
     clearTerminalLine();
     process.stdout.write('\x1B[?25h'); // Show cursor
   }

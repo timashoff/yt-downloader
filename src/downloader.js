@@ -2,11 +2,20 @@ import youtubedl from 'youtube-dl-exec';
 import path from 'path';
 import fs from 'fs/promises';
 import os from 'os';
+import { fileURLToPath } from 'url';
 import { spawn } from 'child_process';
 import { DEFAULT_CONFIG, YTDLP_OPTIONS, YTDLP_AUDIO_OPTIONS, YTDLP_YOUTUBE_HEADERS, ERROR_MESSAGES, SUCCESS_MESSAGES, UI_CONSTANTS, HTTP_HEADERS } from './constants.js';
 import { isYouTubeUrl } from './validator.js';
 import { logError, logSuccess, logInfo, logProgress, logWarning } from './logger.js';
 import { spinner } from './spinner.js';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+function getYtDlpPath() {
+  // Get path relative to project root, not current working directory
+  return path.join(__dirname, '..', 'node_modules', 'youtube-dl-exec', 'bin', 'yt-dlp');
+}
 
 function getSystemDownloadsPath() {
   return path.join(os.homedir(), 'Downloads');
@@ -52,7 +61,7 @@ async function getExpectedFilename(url, options) {
   const { audioOnly, format, quality, outputPath, browser = null } = options;
   
   return new Promise((resolve, reject) => {
-    const ytdlpPath = path.join(process.cwd(), 'node_modules/youtube-dl-exec/bin/yt-dlp');
+    const ytdlpPath = getYtDlpPath();
     
     const args = [
       '--get-filename',
@@ -164,9 +173,9 @@ async function checkFileExists(filePath) {
 
 
 async function callYtDlpDirectly(url, options) {
-  const { audioOnly, format, quality, outputPath, cookiesFromBrowser, verbose, useDownloadSpinner = false } = options;
+  const { audioOnly, format, quality, outputPath, cookiesFromBrowser, verbose, useDownloadSpinner = false, initialMessage = 'Starting download...' } = options;
   return new Promise((resolve, reject) => {
-    const ytdlpPath = path.join(process.cwd(), 'node_modules/youtube-dl-exec/bin/yt-dlp');
+    const ytdlpPath = getYtDlpPath();
     
     const args = [
       '--output', path.join(outputPath, `%(title).${UI_CONSTANTS.TITLE_MAX_LENGTH}s [%(id)s].%(ext)s`),
@@ -249,7 +258,7 @@ async function callYtDlpDirectly(url, options) {
     // Start download spinner if needed
     if (useDownloadSpinner) {
       downloadStartTime = Date.now();
-      spinner.start('Starting download...');
+      spinner.start(initialMessage);
     }
     
     const childProcess = spawn(ytdlpPath, args, {
@@ -437,7 +446,8 @@ async function tryDownloadWithBrowser(url, downloadOptions, browser, useDownload
       outputPath: path.dirname(downloadOptions.output),
       cookiesFromBrowser: browser,
       verbose: downloadOptions.verbose,
-      useDownloadSpinner
+      useDownloadSpinner,
+      initialMessage: `Trying ${browser} cookies...` // Pass initial message for spinner
     };
     
     // Debug logging only in verbose mode
@@ -554,12 +564,9 @@ export async function downloadVideo(url, options = {}) {
           ? [browser, ...DEFAULT_CONFIG.BROWSER_FALLBACK_ORDER.filter(b => b !== browser)]
           : DEFAULT_CONFIG.BROWSER_FALLBACK_ORDER;
 
-        // Try browsers with download progress
-        
-        // Try browsers in order
+        // Try browsers in order - each will manage its own spinner
         for (const browserToTry of browsersToTry) {
-          spinner.updateMessage(`Trying ${browserToTry} cookies...`);
-          const attempt = await tryDownloadWithBrowser(url, downloadOptions, browserToTry, true); // Download with progress
+          const attempt = await tryDownloadWithBrowser(url, downloadOptions, browserToTry, true); // Enable spinner for each attempt
           if (attempt.success) {
             result = attempt.result;
             successfulBrowser = attempt.browser;
@@ -569,7 +576,6 @@ export async function downloadVideo(url, options = {}) {
 
         // If all browsers fail, try WITHOUT cookies
         if (!result) {
-          spinner.updateMessage('Trying without cookies...');
           try {
             const callOptions = {
               audioOnly: downloadOptions.audioOnly,
@@ -578,20 +584,20 @@ export async function downloadVideo(url, options = {}) {
               outputPath: path.dirname(downloadOptions.output),
               cookiesFromBrowser: null,
               verbose: downloadOptions.verbose,
-              useDownloadSpinner: true
+              useDownloadSpinner: true, // Enable spinner for progress display
+              initialMessage: 'Trying without cookies...'
             };
             result = await callYtDlpDirectly(url, callOptions);
           } catch (error) {
-            spinner.stop(false, 'Connection failed');
-            logError('Full error WITHOUT cookies:', error.message);
-            logError('Stderr:', error.stderr);
-            logError('Stdout:', error.stdout);
-            throw new Error('Failed to download even without cookies');
+            if (downloadOptions.verbose) {
+              logError('Error without cookies:', error.message);
+              if (error.stderr) logError('Details:', error.stderr);
+            }
+            throw new Error(error.message);
           }
         }
       } else {
         // For non-YouTube sites, try direct download without cookies
-        spinner.start('Connecting to site...');
         try {
           const callOptions = {
             audioOnly: downloadOptions.audioOnly,
@@ -600,11 +606,11 @@ export async function downloadVideo(url, options = {}) {
             outputPath: path.dirname(downloadOptions.output),
             cookiesFromBrowser: null,
             verbose: downloadOptions.verbose,
-            useDownloadSpinner: true
+            useDownloadSpinner: true,
+            initialMessage: 'Connecting to site...'
           };
           result = await callYtDlpDirectly(url, callOptions);
         } catch (error) {
-          spinner.stop(false, 'Connection failed');
           if (error.timeout) {
             logError('Download timed out after 60 seconds of no activity - site may be unresponsive or blocked');
           } else {
@@ -621,6 +627,12 @@ export async function downloadVideo(url, options = {}) {
           throw new Error('Failed to download from this site');
         }
       }
+    }
+
+    // Stop spinner with success message if it's still running
+    if (spinner.isRunning()) {
+      const finalFilename = result.finalFilename || expectedFilename || 'file';
+      spinner.stop(true, `Downloaded "${finalFilename}"`);
     }
 
     // Show additional info only in verbose mode
