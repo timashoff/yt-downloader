@@ -6,3 +6,19 @@ downloads/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+
+# yt-dlp cookies file (-c): a signed-in YouTube session
+*cookies*.txt
+
+# Downloaded and unfinished audio and video
+*.m4a
+*.mp3
+*.wav
+*.flac
+*.opus
+*.mp4
+*.mkv
+*.webm
+*.part
+*.part-Frag*
+*.ytdl
