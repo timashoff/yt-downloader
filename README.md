@@ -2,61 +2,53 @@
 
 🌍 **Languages**: [**🇺🇸 English**](README.md) | [🇷🇺 Русский](README.ru.md)
 
-A fast, universal CLI tool for downloading videos and audio from any website including YouTube, video hosting sites, and more.
+A fast CLI tool for downloading audio and video from YouTube and 1000+ other sites, made for listening offline: podcasts and music land in `~/Downloads` as tagged files with cover art and chapters.
 
 > **Command name**: `udav` (**U**niversal **D**ownload **A**udio **V**ideo)
 
 ## Quick Start
 
-### Global Installation (Recommended)
-
 ```bash
-# Install globally
+# Requirements (macOS)
+brew install ffmpeg
+
+# Install the command globally
 npm install -g .
 
 # Download audio (default mode)
 udav "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
 
-# Download video  
+# Download video
 udav "https://www.youtube.com/watch?v=dQw4w9WgXcQ" -v
 ```
 
-### Local Development
-
-```bash
-# Install dependencies
-npm install
-
-# Download audio (default mode)
-npm run audio "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
-
-# Download video
-npm run video "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
-```
+The first run downloads yt-dlp (about 50 MB, once) and takes about a minute; after that a short track takes a few seconds.
 
 ## Features
 
-- ✅ **Universal Support**: Works with YouTube, video hosting sites, and hundreds of other websites
-- ⚡ **Optimized Speed**: Smart format selection for faster downloads (up to 8MB/s vs 500KB/s)
-- 📁 **Smart File Organization**: Automatically organizes files into `~/Downloads/Audio/{domain}/` or `~/Downloads/Video/{domain}/`
-- 🎵 **Audio Extraction**: Extract audio in multiple formats (MP3, M4A, WAV, FLAC)
-- 🎬 **Video Download**: Download videos in available qualities
-- 🔄 **Smart Timeout**: Dynamic timeout that resets on activity, prevents hanging
-- 🍪 **Browser Cookies**: Automatic cookie extraction for authenticated content
-- 📊 **Progress Bars**: Real-time download progress with file information
+- 🎵 **Audio first**: M4A by default, taken from YouTube's AAC stream as is (no re-encoding, no quality loss)
+- 🏷 **Ready for players**: title, artist, date and cover art are embedded; podcast chapters too (M4A, MP3)
+- 🎬 **Video that plays everywhere**: MP4 with H.264 + AAC (QuickTime, iPhone, TVs), up to 1080p; `-q max` for 4K
+- 📚 **Playlists**: a playlist link saves every item into its own numbered subfolder
+- 📁 **Smart file organization**: `~/Downloads/Audio/{site}/` and `~/Downloads/Video/{site}/`
+- 🔄 **Keeps working**: udav installs yt-dlp itself and updates it daily; if YouTube changes something, it updates and retries
+- 🍪 **Cookies only when needed**: browser cookies are used only when YouTube asks to sign in
+- ⏯ **Resumable**: interrupted downloads (Ctrl+C, lost connection) continue from where they stopped
 
 ## Installation
 
 ```bash
 git clone <repository-url>
-cd universal-downloader
+cd yt-downloader
 npm install
+npm install -g .   # optional: the global `udav` command
 ```
 
 ### Requirements
 
-- Node.js >= 16.0.0
-- FFmpeg (for audio processing)
+- **Node.js 22+**. udav also hands it to yt-dlp as the JavaScript runtime that YouTube requires.
+- **FFmpeg** (extracting audio, merging video with sound, embedding covers)
+- **yt-dlp** is managed automatically on macOS: it lives in `~/Library/Application Support/udav` (about 125 MB) and is checked for updates once a day. No Python needed.
 
 #### Install FFmpeg
 
@@ -65,31 +57,17 @@ npm install
 brew install ffmpeg
 ```
 
-**Windows:**
-Download from https://ffmpeg.org/download.html
-
 **Linux:**
 ```bash
 sudo apt install ffmpeg  # Ubuntu/Debian
 sudo yum install ffmpeg  # CentOS/RHEL
 ```
 
-#### macOS Full Disk Access (для YouTube)
+**Windows:** download from https://ffmpeg.org/download.html
 
-Для надежной работы с YouTube на macOS требуется Full Disk Access для доступа к cookies браузера:
+#### Linux and Windows
 
-1. **Откройте System Settings** (System Preferences на старых версиях)
-2. **Перейдите в Privacy & Security → Full Disk Access**
-3. **Нажмите кнопку "+" и добавьте:**
-   - **Terminal.app** (если используете Terminal)
-   - **iTerm.app** (если используете iTerm)
-4. **Перезапустите терминал**
-
-**Почему это нужно?**
-- YouTube блокирует запросы без cookies как ботов
-- macOS защищает файлы cookies браузеров
-- Full Disk Access позволяет yt-dlp читать cookies Safari/Chrome
-- Без этого могут быть ошибки "Sign in to confirm you're not a bot"
+Automatic yt-dlp management is macOS only. Elsewhere install [yt-dlp](https://github.com/yt-dlp/yt-dlp#installation) so it is in `PATH`. Any platform: `UDAV_YTDLP=/path/to/yt-dlp` makes udav use that binary.
 
 ## Usage
 
@@ -102,422 +80,139 @@ udav "URL"
 # Video download
 udav "URL" -v
 
-# Explicit audio (same as default)
-udav "URL" -a
+# Whole playlist (each item, numbered, into a subfolder)
+udav "https://www.youtube.com/playlist?list=..."
 ```
+
+A link to a track inside a playlist or a YouTube Mix (`watch?v=...&list=...`) downloads only that track.
 
 ### Local Development Alternative
 
 ```bash
-# Audio download (default mode)
 npm run audio "URL"
-node src/cli.js "URL"        # default is now audio
-
-# Video download  
 npm run video "URL"
-node src/cli.js "URL" -v     # explicit video
+node src/cli.js "URL"        # audio
+node src/cli.js "URL" -v     # video
 ```
 
 ### Advanced Options
 
 ```bash
-# Verbose output for troubleshooting
+# Verbose output for troubleshooting (IP addresses are masked)
 udav "URL" --verbose
 
 # Custom output directory (overrides smart organization)
 udav "URL" -o ./downloads
 
-# Video info before download
+# Title, author and duration before downloading
 udav "URL" -i
 
-# Use browser cookies (for authenticated content)
+# Always use browser cookies (for private or members-only videos)
 udav "URL" -b safari
 
-# Custom audio format
+# Audio in MP3
 udav "URL" -f mp3
 
-# Video with specific quality
+# Smaller files: 720p video, or low-bitrate audio (fine for speech)
 udav "URL" -v -q 720p
-```
+udav "URL" -q worst
 
-### Using npm scripts (alternative)
-
-```bash
-# With npm run (for development)
-npm run audio "URL" -- --verbose
-npm run video "URL" -- -o ./downloads
+# Update yt-dlp right now
+udav --update
 ```
 
 ## File Organization
 
-By default, the tool automatically organizes downloaded files into your system's Downloads folder with a smart directory structure:
-
-### Directory Structure
-
 ```
 ~/Downloads/
 ├── Audio/
-│   ├── youtube/
-│   │   ├── Song Title [video_id].m4a
-│   │   └── Another Song [video_id].mp3
-│   ├── instagram/
-│   │   └── Audio File [id].m4a
-│   └── soundcloud/
-│       └── Track Name [id].wav
+│   └── youtube/
+│       ├── Song Title [video_id].m4a
+│       └── Podcast Playlist/
+│           ├── 1 - First Episode [id].m4a
+│           └── 2 - Second Episode [id].m4a
 └── Video/
     ├── youtube/
-    │   ├── Video Title [video_id].mp4
-    │   └── Another Video [video_id].webm
-    ├── tiktok/
-    │   └── Video [id].mp4
-    └── twitter/
-        └── Tweet Video [id].mp4
+    │   └── Video Title [video_id].mp4
+    └── vimeo/
+        └── Video [id].mp4
 ```
 
-### How it Works
+- **Audio downloads** (default mode or `-a`) → `~/Downloads/Audio/{site}/`
+- **Video downloads** (`-v`) → `~/Downloads/Video/{site}/`
+- **Duplicates**: an existing file is not downloaded again
+- Long titles are shortened to fit the macOS file name limit (also for Cyrillic and other non-Latin titles)
 
-- **Audio downloads** (default mode or `-a` flag) → `~/Downloads/Audio/{domain}/`
-- **Video downloads** (`-v` flag) → `~/Downloads/Video/{domain}/`  
-- **Domain extraction**: Automatically extracts clean domain names (e.g., `youtube` from `youtube.com`)
-- **Duplicate prevention**: Checks if file exists before downloading
-- **Auto-creation**: Creates directories automatically as needed
+## Quality
 
-### Custom Output Directory
+### Video (`-v`)
 
-You can override the smart organization by specifying a custom output directory:
+| `-q` | Result |
+|------|--------|
+| `best` (default) | Best MP4 with H.264 + AAC, usually 1080p. Plays in QuickTime, on iPhone and TVs |
+| `1080p`, `720p`, `480p`, `360p` | The same, limited to that height |
+| `worst` | Smallest MP4 |
+| `max` | Highest resolution in any codec (4K AV1/VP9 in WebM/MKV): needs VLC or IINA |
 
-```bash
-# Save to custom location instead of smart organization
-udav "URL" -v -o ./my-videos    # video to custom location
-udav "URL" -o ./my-music        # audio to custom location
-```
+### Audio
 
-## Supported Sites
+| `-f` | Result |
+|------|--------|
+| `m4a` (default) | YouTube's AAC as is, no re-encoding |
+| `mp3` | Converted at the highest MP3 quality (VBR V0) |
+| `flac`, `wav` | Converted (larger files, no quality gain over the source) |
 
-- **YouTube** - Full support with automatic cookie handling
-- **Video Hosting Sites** - Optimized for fast downloads
-- **Social Media** - Twitter, TikTok, Instagram, etc.
-- **Educational** - Coursera, Udemy, Khan Academy, etc.
-- **Live Streams** - Twitch, YouTube Live, etc.
-- **And 1000+ more sites** supported by yt-dlp
-
-## Quality & Performance
-
-### Download Speed Optimization
-
-This tool automatically selects the best download method for each site:
-
-- **YouTube**: Separate video+audio streams for best quality
-- **Other Sites**: Direct HTTPS downloads preferred over slow HLS streams
-- **Result**: Up to 16x faster downloads (8MB/s vs 500KB/s)
-
-### Quality Limitations
-
-**YouTube**: Due to platform restrictions, video quality is often limited to 360p-480p without authentication. This is normal and affects all downloaders.
-
-**Other Sites**: Full quality options usually available (720p, 1080p, etc.)
+`-q worst` picks the smallest audio stream (about 50 instead of 130 kbit/s on YouTube): 2.5 times smaller, good enough for speech.
 
 ## Troubleshooting
 
 ### YouTube "Sign in to confirm you're not a bot"
 
-YouTube blocks unauthenticated downloads. Solutions:
+udav first downloads without cookies. When YouTube asks to sign in, it retries with cookies from your browsers: Safari, Firefox, Chrome, Edge (installed ones only).
 
-#### macOS Users
-1. **Enable Full Disk Access** (Most important):
-   - System Settings → Privacy & Security → Full Disk Access
-   - Add Terminal.app or iTerm.app
-   - Restart terminal
-   
-2. **Use browser cookies** (after FDA is enabled):
-   ```bash
-   npm run video "URL" -- -b safari  # Recommended for macOS
-   npm run video "URL" -- -b chrome
-   ```
+1. **Sign in to YouTube** in one of these browsers and run udav again.
+2. **Chrome or Edge**: macOS asks for the keychain password so that yt-dlp can read the cookies. Choose "Always Allow".
+3. **Safari**: its cookies need Full Disk Access for your terminal app: System Settings → Privacy & Security → Full Disk Access → add Terminal, iTerm or Warp, then restart it.
+4. **On a VPN?** YouTube asks datacenter IP addresses to sign in more often: try another server.
 
-#### All Platforms
-1. **Make sure you're logged into YouTube** in the specified browser
-2. **Try different browsers**: `-b safari`, `-b firefox`, `-b edge`
-3. **Error persists?** The app will try fallback methods automatically
+### "YouTube changed something"
 
-**Note**: Without Full Disk Access on macOS, the app cannot read browser cookies, causing YouTube to block downloads as bot activity.
+Errors like "Requested format is not available" or "HTTP Error 403" usually mean YouTube changed something. udav then checks for a newer yt-dlp, installs it and retries. If you already have the latest one, a fix usually appears within days; `udav --update` installs it right away.
 
-### Slow Downloads
+### Network problems
 
-The tool automatically optimizes download speed, but if you experience issues:
+"Network problem" means the site could not be reached: check the connection or VPN. An interrupted download continues when you run the same command again.
 
-1. **Use verbose mode** to see details:
-   ```bash
-   npm run video "URL" -- -v
-   ```
+### macOS asks about the Downloads folder
 
-2. **Check your internet connection**
-
-3. **Some sites may have rate limiting** - this is normal
+On the first download macOS may ask to let your terminal app access the Downloads folder: allow it. If you declined before: System Settings → Privacy & Security → Files and Folders.
 
 ### URL with Special Characters
 
-If your URL contains `?`, `&`, or `=` characters:
+Always put the URL in quotes:
 
 ```bash
-# Always use quotes
-npm run video "https://example.com/video?id=123&t=45"
-
-# NOT this (will fail)
-npm run video https://example.com/video?id=123&t=45
+udav "https://www.youtube.com/watch?v=dQw4w9WgXcQ&list=PL123"   # works
+udav https://www.youtube.com/watch?v=dQw4w9WgXcQ&list=PL123     # fails in zsh
 ```
 
 ## Command Reference
 
-### Global Installation
-
-```bash
-npm install -g .
-```
-
-### Options
-
-- `-a, --audio` - Extract audio only (explicit, same as default)
-- `-v, --video` - Download video (default: audio mode)
-- `-o, --output <dir>` - Custom output directory (default: smart organization to `~/Downloads/Audio|Video/{domain}/`)
+- `-a, --audio` - Extract audio only (default mode)
+- `-v, --video` - Download video
+- `-o, --output <dir>` - Custom output directory (default: `~/Downloads/Audio|Video/{site}/`)
 - `-f, --format <format>` - Audio format: `mp3|m4a|wav|flac` (default: `m4a`)
-- `-q, --quality <quality>` - Video/Audio quality: `best|worst|720p|1080p|480p|360p` (default: `best`)
-- `-i, --info` - Show video information before downloading
-- `-b, --browser <browser>` - Browser for cookies: `chrome|firefox|safari|edge`
-- `-c, --cookies <file>` - Path to cookies.txt file
+- `-q, --quality <quality>` - Video: `best|max|worst|1080p|720p|480p|360p`; audio: `best|worst` (default: `best`)
+- `-i, --info` - Show title, author and duration before downloading
+- `-b, --browser <browser>` - Always use cookies from this browser: `chrome|firefox|safari|edge`
+- `-c, --cookies <file>` - Path to a cookies.txt file
+- `-U, --update` - Update yt-dlp now (it is also checked automatically once a day)
 - `--verbose` - Show detailed yt-dlp output
 - `-h, --help` - Show help
 
-### Examples
-
-```bash
-# Basic audio download (default)
-udav "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
-
-# Video download
-udav "https://www.youtube.com/watch?v=dQw4w9WgXcQ" -v
-
-# Audio in MP3 format
-udav "https://www.youtube.com/watch?v=dQw4w9WgXcQ" -f mp3
-
-# Video with browser cookies
-udav "https://www.youtube.com/watch?v=dQw4w9WgXcQ" -v -b safari
-
-# Show video info first
-udav "https://www.youtube.com/watch?v=dQw4w9WgXcQ" -i
-
-# Custom output directory (overrides smart organization)
-udav "https://www.youtube.com/watch?v=dQw4w9WgXcQ" -o ./music
-
-# Verbose troubleshooting
-udav "https://www.youtube.com/watch?v=dQw4w9WgXcQ" --verbose
-
-# Smart organization examples:
-# This audio file → ~/Downloads/Audio/youtube/Song Title [id].m4a
-udav "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
-
-# This video file → ~/Downloads/Video/instagram/Video Title [id].mp4  
-udav "https://www.instagram.com/p/example" -v
-```
-
 ## Dependencies
 
-- [youtube-dl-exec](https://www.npmjs.com/package/youtube-dl-exec) - yt-dlp wrapper
-- [commander](https://www.npmjs.com/package/commander) - Command-line argument parsing
-- [chalk](https://www.npmjs.com/package/chalk) - Terminal colors
-- [cli-progress](https://www.npmjs.com/package/cli-progress) - Progress bars
-
----
-
-# Universal Downloader (Русская версия)
-
-Быстрый универсальный CLI инструмент для скачивания видео и аудио с любых сайтов, включая YouTube, видеохостинги и многое другое.
-
-## Быстрый старт
-
-```bash
-# Установка зависимостей
-npm install
-
-# Скачать видео (по умолчанию)
-npm run video "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
-
-# Скачать только аудио
-npm run audio "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
-```
-
-## Возможности
-
-- ✅ **Универсальная поддержка**: Работает с YouTube, видеохостингами и сотнями других сайтов
-- ⚡ **Оптимизированная скорость**: Умный выбор формата для быстрых загрузок (до 8МБ/с против 500КБ/с)
-- 📁 **Умная организация файлов**: Автоматически организует файлы в `~/Downloads/Audio/{домен}/` или `~/Downloads/Video/{домен}/`
-- 🎵 **Извлечение аудио**: Извлечение аудио в разных форматах (MP3, M4A, WAV, FLAC)
-- 🎬 **Скачивание видео**: Скачивание видео в доступных качествах
-- 🔄 **Умный таймаут**: Динамический таймаут, который сбрасывается при активности
-- 🍪 **Cookies браузера**: Автоматическое извлечение cookies для авторизованного контента
-- 📊 **Прогресс-бары**: Прогресс загрузки в реальном времени с информацией о файле
-
-## Установка
-
-```bash
-git clone <repository-url>
-cd universal-downloader
-npm install
-```
-
-### Требования
-
-- Node.js >= 16.0.0
-- FFmpeg (для обработки аудио)
-
-## Использование
-
-### Базовое использование
-
-```bash
-# Скачать видео
-npm run video "URL"
-
-# Скачать только аудио
-npm run audio "URL"
-
-# Альтернативный прямой вызов
-node src/cli.js "URL"        # видео
-node src/cli.js "URL" -a     # аудио
-```
-
-### Дополнительные опции
-
-```bash
-# Подробный вывод для диагностики
-npm run video "URL" -- -v
-
-# Своя папка для сохранения (переопределяет умную организацию)
-npm run video "URL" -- -o ./downloads
-
-# Информация о видео перед скачиванием
-npm run video "URL" -- -i
-
-# Использовать cookies браузера
-npm run video "URL" -- -b chrome
-
-# Формат аудио (только для аудио режима)
-npm run audio "URL" -- -f mp3
-```
-
-## Организация файлов
-
-По умолчанию инструмент автоматически организует загруженные файлы в папку Downloads с умной структурой каталогов:
-
-### Структура каталогов
-
-```
-~/Downloads/
-├── Audio/
-│   ├── youtube/
-│   │   ├── Название песни [video_id].m4a
-│   │   └── Другая песня [video_id].mp3
-│   ├── instagram/
-│   │   └── Аудио файл [id].m4a
-│   └── soundcloud/
-│       └── Название трека [id].wav
-└── Video/
-    ├── youtube/
-    │   ├── Название видео [video_id].mp4
-    │   └── Другое видео [video_id].webm
-    ├── tiktok/
-    │   └── Видео [id].mp4
-    └── twitter/
-        └── Видео из твита [id].mp4
-```
-
-### Как это работает
-
-- **Загрузки аудио** (`npm run audio` или флаг `-a`) → `~/Downloads/Audio/{домен}/`
-- **Загрузки видео** (режим по умолчанию) → `~/Downloads/Video/{домен}/`  
-- **Извлечение домена**: Автоматически извлекает чистые названия доменов (например, `youtube` из `youtube.com`)
-- **Предотвращение дубликатов**: Проверяет существование файла перед загрузкой
-- **Автосоздание**: Создает каталоги автоматически по мере необходимости
-
-### Пользовательская папка для сохранения
-
-Вы можете переопределить умную организацию, указав пользовательскую папку:
-
-```bash
-# Сохранить в указанное место вместо умной организации
-npm run video "URL" -- -o ./мои-видео
-npm run audio "URL" -- -o ./моя-музыка
-```
-
-## Поддерживаемые сайты
-
-- **YouTube** - Полная поддержка с автоматической обработкой cookies
-- **Видеохостинги** - Оптимизированы для быстрых загрузок
-- **Социальные сети** - Twitter, TikTok, Instagram и др.
-- **Образовательные** - Coursera, Udemy, Khan Academy и др.
-- **Прямые трансляции** - Twitch, YouTube Live и др.
-- **И 1000+ других сайтов** поддерживаемых yt-dlp
-
-## Качество и производительность
-
-### Ограничения качества
-
-**YouTube**: Из-за ограничений платформы качество видео часто ограничено 360p-480p без аутентификации. Это нормально и затрагивает все загрузчики.
-
-**Другие сайты**: Обычно доступны полные опции качества (720p, 1080p и т.д.)
-
-## Решение проблем
-
-### YouTube "Sign in to confirm you're not a bot"
-
-YouTube блокирует неавторизованные загрузки. Решения:
-
-1. **Используйте cookies браузера** (рекомендуется):
-   ```bash
-   npm run video "URL" -- -b chrome
-   ```
-
-2. **Убедитесь что вы вошли в YouTube** в указанном браузере
-
-3. **Попробуйте разные браузеры**: `-b safari`, `-b firefox`, `-b edge`
-
-### URL со специальными символами
-
-Если ваш URL содержит символы `?`, `&` или `=`:
-
-```bash
-# Всегда используйте кавычки
-npm run video "https://example.com/video?id=123&t=45"
-
-# НЕ так (будет ошибка)
-npm run video https://example.com/video?id=123&t=45
-```
-
-### Примеры
-
-```bash
-# Базовое скачивание видео
-npm run video "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
-
-# Аудио в формате MP3
-npm run audio "https://www.youtube.com/watch?v=dQw4w9WgXcQ" -- -f mp3
-
-# Видео с cookies браузера
-npm run video "https://www.youtube.com/watch?v=dQw4w9WgXcQ" -- -b safari
-
-# Показать информацию о видео сначала
-npm run video "https://www.youtube.com/watch?v=dQw4w9WgXcQ" -- -i
-
-# Своя папка для сохранения (переопределяет умную организацию)
-npm run video "https://www.youtube.com/watch?v=dQw4w9WgXcQ" -- -o ./music
-
-# Подробная диагностика
-npm run video "https://www.youtube.com/watch?v=dQw4w9WgXcQ" -- -v
-
-# Примеры умной организации:
-# Этот аудио файл → ~/Downloads/Audio/youtube/Название песни [id].m4a
-npm run audio "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
-
-# Этот видео файл → ~/Downloads/Video/instagram/Название видео [id].mp4  
-npm run video "https://www.instagram.com/p/example"
-```
+- [yt-dlp](https://github.com/yt-dlp/yt-dlp) - the downloader itself (installed and updated by udav on macOS)
+- [FFmpeg](https://ffmpeg.org) - audio extraction, merging, tags and covers
+- [commander](https://www.npmjs.com/package/commander) - command-line argument parsing
+- [chalk](https://www.npmjs.com/package/chalk) - terminal colors

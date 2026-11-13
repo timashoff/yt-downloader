@@ -1,10 +1,14 @@
+import chalk from 'chalk';
 import { UI_SYMBOLS, SPINNER_CONSTANTS } from './constants.js';
+
+// No animation and no cursor codes when the output goes to a file or a pipe
+const isInteractive = () => Boolean(process.stdout.isTTY);
 
 /**
  * Clear the current terminal line
  */
 export function clearTerminalLine() {
-  process.stdout.write('\r\x1b[K');
+  if (isInteractive()) process.stdout.write('\r\x1b[K');
 }
 
 /**
@@ -15,18 +19,52 @@ function getElapsedTime(startTime) {
 }
 
 /**
+ * Terminal columns taken by a character: 2 for CJK and emoji, 0 for combining marks
+ */
+function charWidth(codePoint) {
+  if ((codePoint >= 0x0300 && codePoint <= 0x036f)
+    || (codePoint >= 0x200b && codePoint <= 0x200f)
+    || (codePoint >= 0xfe00 && codePoint <= 0xfe0f)) return 0;
+  if ((codePoint >= 0x1100 && codePoint <= 0x115f)
+    || (codePoint >= 0x2e80 && codePoint <= 0xa4cf)
+    || (codePoint >= 0xac00 && codePoint <= 0xd7a3)
+    || (codePoint >= 0xf900 && codePoint <= 0xfaff)
+    || (codePoint >= 0xfe30 && codePoint <= 0xfe4f)
+    || (codePoint >= 0xff00 && codePoint <= 0xff60)
+    || (codePoint >= 0xffe0 && codePoint <= 0xffe6)
+    || (codePoint >= 0x1f300 && codePoint <= 0x1faff)
+    || (codePoint >= 0x20000 && codePoint <= 0x3fffd)) return 2;
+  return 1;
+}
+
+function displayWidth(text) {
+  return Array.from(text).reduce((sum, char) => sum + charWidth(char.codePointAt(0)), 0);
+}
+
+/**
+ * Cut text to fit into maxWidth terminal columns (adds an ellipsis when cut)
+ */
+export function truncateToWidth(text, maxWidth) {
+  const chars = Array.from(text);
+  const widths = chars.map((char) => charWidth(char.codePointAt(0)));
+  if (widths.reduce((sum, width) => sum + width, 0) <= maxWidth) return text;
+  let used = 0;
+  let result = '';
+  for (let i = 0; i < chars.length && used + widths[i] <= maxWidth - 1; i++) {
+    used += widths[i];
+    result += chars[i];
+  }
+  return `${result}…`;
+}
+
+/**
  * Show status message with icon and time
  */
 export function showStatus(type, time, message = '') {
   const icon = type === 'success' ? UI_SYMBOLS.CHECK : UI_SYMBOLS.CROSS;
-  const statusColor = type === 'success' ? '\x1b[32m' : '\x1b[31m'; // green or red
-  const resetColor = '\x1b[0m';
-  
-  const statusText = message 
-    ? `${statusColor}${icon} ${time}s${resetColor} ${message}`
-    : `${statusColor}${icon} ${time}s${resetColor}`;
-  
-  console.log(statusText);
+  const color = type === 'success' ? chalk.green : chalk.red;
+  const status = color(`${icon} ${time}s`);
+  console.log(message ? `${status} ${message}` : status);
 }
 
 /**
@@ -39,7 +77,9 @@ export class SpinnerManager {
     this.startTime = null;
     this.spinnerIndex = 0;
     this.message = '';
+    this.subject = '';
     this.progress = null;
+    this.detail = '';
   }
 
   /**
@@ -55,26 +95,35 @@ export class SpinnerManager {
     this.startTime = Date.now();
     this.spinnerIndex = 0;
     this.message = message;
+    this.subject = '';
     this.progress = null;
+    this.detail = '';
+
+    if (!isInteractive()) return;
 
     // Hide cursor
     process.stdout.write('\x1B[?25l');
+    this.interval = setInterval(() => this.render(), SPINNER_CONSTANTS.INTERVAL);
+  }
 
-    this.interval = setInterval(() => {
-      if (!this.isActive) return;
+  render() {
+    if (!this.isActive) return;
+    const frame = UI_SYMBOLS.SPINNER[this.spinnerIndex++ % UI_SYMBOLS.SPINNER.length];
+    const columns = (process.stdout.columns || 80) - 1;
 
-      clearTerminalLine();
-      const spinner = UI_SYMBOLS.SPINNER[this.spinnerIndex++ % UI_SYMBOLS.SPINNER.length];
-      
-      let statusText = `${spinner} ${this.message}`;
-      
-      // Add progress if available
-      if (this.progress !== null) {
-        statusText += ` ${this.progress}%`;
-      }
+    const head = `${frame} ${this.message}`;
+    const tail = [this.progress !== null ? `${this.progress}%` : '', this.detail].filter(Boolean).join(' ');
+    let statusText = tail ? `${head} ${tail}` : head;
+    if (this.subject) {
+      // The subject (a title) shrinks first, so the percentage always stays visible
+      const room = Math.max(10, columns - displayWidth(statusText) - 3);
+      const subject = `"${truncateToWidth(this.subject, room)}"`;
+      statusText = tail ? `${head} ${subject} ${tail}` : `${head} ${subject}`;
+    }
 
-      process.stdout.write(statusText);
-    }, SPINNER_CONSTANTS.INTERVAL);
+    // A line longer than the terminal wraps, and "clear line" then leaves garbage behind
+    clearTerminalLine();
+    process.stdout.write(truncateToWidth(statusText, columns));
   }
 
   /**
@@ -87,12 +136,29 @@ export class SpinnerManager {
   }
 
   /**
-   * Update progress percentage
+   * What the message is about (shown in quotes, shortened first when space is short)
    */
-  updateProgress(percent) {
+  updateSubject(subject) {
     if (this.isActive) {
-      this.progress = Math.round(percent);
+      this.subject = subject;
     }
+  }
+
+  /**
+   * Update progress percentage (null hides it) and an optional detail like "of 25 MB, 3 MB/s"
+   */
+  updateProgress(percent, detail = '') {
+    if (!this.isActive) return;
+    this.progress = Number.isFinite(percent) ? Math.min(100, Math.round(percent)) : null;
+    this.detail = detail;
+  }
+
+  /**
+   * Print a line above the spinner without breaking it
+   */
+  log(text) {
+    clearTerminalLine();
+    console.log(text);
   }
 
   /**
@@ -102,16 +168,16 @@ export class SpinnerManager {
     if (!this.isActive) return;
 
     this.isActive = false;
-    
+
     if (this.interval) {
       clearInterval(this.interval);
       this.interval = null;
     }
 
     clearTerminalLine();
-    
+
     // Show cursor
-    process.stdout.write('\x1B[?25h');
+    if (isInteractive()) process.stdout.write('\x1B[?25h');
 
     if (this.startTime) {
       const finalTime = getElapsedTime(this.startTime);
@@ -138,7 +204,7 @@ export class SpinnerManager {
     this.isActive = false;
     this.startTime = null;
     clearTerminalLine();
-    process.stdout.write('\x1B[?25h'); // Show cursor
+    if (isInteractive()) process.stdout.write('\x1B[?25h'); // Show cursor
   }
 }
 

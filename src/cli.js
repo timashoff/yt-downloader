@@ -1,5 +1,7 @@
 #!/usr/bin/env node
 
+import fs from 'node:fs/promises';
+import { createRequire } from 'node:module';
 import { Command } from 'commander'
 import chalk from 'chalk'
 import {
@@ -9,170 +11,138 @@ import {
   validateVideoQuality,
   validateBrowser,
 } from './validator.js'
-import { downloadVideo, getVideoInfo } from './downloader.js'
-import { DEFAULT_CONFIG, ERROR_MESSAGES, UI_CONSTANTS } from './constants.js'
-import { logError, logSuccess, logInfo } from './logger.js'
+import { downloadVideo, updateYtDlp } from './downloader.js'
+import { DEFAULT_CONFIG, ERROR_MESSAGES, UI_CONSTANTS, YTDLP } from './constants.js'
+import { logError, logWarning } from './logger.js'
+import { spinner } from './spinner.js'
+
+const { version } = createRequire(import.meta.url)('../package.json')
+
+// Ctrl+C: yt-dlp stops on its own (it gets the same signal) and keeps the partial
+// file, so running the same command again resumes the download.
+process.on('SIGINT', () => {
+  spinner.cleanup()
+  console.log(chalk.yellow('\nCancelled. Run the same command again to resume.'))
+  process.exit(UI_CONSTANTS.EXIT_CODE_INTERRUPTED)
+})
+
+function fixUrlEscaping(url) {
+  // First handle shell escaping (backslashes before special characters)
+  let fixedUrl = url.replace(/\\([?&=])/g, '$1'); // Remove backslashes before ?, &, =
+
+  // Then try URI decoding if needed
+  try {
+    const decoded = decodeURIComponent(fixedUrl);
+    // Only use decoded version if it looks like a valid URL
+    if (decoded.startsWith('http')) {
+      fixedUrl = decoded;
+    }
+  } catch {
+    // If decoding fails, keep the shell-unescaped version
+  }
+  return fixedUrl
+}
+
+function fail(message) {
+  logError(message)
+  process.exit(UI_CONSTANTS.EXIT_CODE_ERROR)
+}
 
 const program = new Command()
 
 program
-  .name('universal-downloader')
-  .description('Universal downloader for any website')
-  .version('1.0.0')
-  .option(
-    '-o, --output <dir>',
-    `Save directory (default: ${DEFAULT_CONFIG.OUTPUT_DIR})`,
-    DEFAULT_CONFIG.OUTPUT_DIR,
-  )
-  .option('-a, --audio', 'Extract audio only (explicit)')
-  .option('-v, --video', 'Download video (default: audio)')
+  .name('udav')
+  .description('Download audio (default) or video from YouTube and 1000+ other sites')
+  .version(version)
+  .option('-o, --output <dir>', 'Save directory (default: ~/Downloads/Audio|Video/<site>)')
+  .option('-a, --audio', 'Extract audio only (default mode)')
+  .option('-v, --video', 'Download video (MP4: H.264 + AAC, plays everywhere)')
   .option(
     '-f, --format <format>',
-    `Audio format: ${DEFAULT_CONFIG.SUPPORTED_FORMATS.join('|')} (default: ${DEFAULT_CONFIG.AUDIO_FORMAT})`,
+    `Audio format: ${DEFAULT_CONFIG.SUPPORTED_FORMATS.join('|')}`,
     DEFAULT_CONFIG.AUDIO_FORMAT,
   )
   .option(
     '-q, --quality <quality>',
-    `Video/Audio quality: ${DEFAULT_CONFIG.VIDEO_QUALITY_OPTIONS.join('|')} (default: ${DEFAULT_CONFIG.VIDEO_QUALITY})`,
+    `Video: ${DEFAULT_CONFIG.VIDEO_QUALITY_OPTIONS.join('|')} (max = highest resolution, any codec); audio: ${DEFAULT_CONFIG.AUDIO_QUALITY_OPTIONS.join('|')}`,
     DEFAULT_CONFIG.VIDEO_QUALITY,
   )
-  .option('-i, --info', 'Show video information before downloading')
+  .option('-i, --info', 'Show title, author and duration before downloading')
   .option(
     '-b, --browser <browser>',
-    'Browser for cookies: chrome|firefox|safari|edge',
+    `Always use cookies from this browser: ${DEFAULT_CONFIG.SUPPORTED_BROWSERS.join('|')}`,
   )
   .option('-c, --cookies <file>', 'Path to cookies.txt file')
+  .option('-U, --update', 'Update yt-dlp now (also checked automatically once a day)')
   .option('--verbose', 'Show detailed yt-dlp output')
-  .argument('<url>', 'Video URL to download')
+  .argument('[url]', 'Video, track or playlist URL (in quotes)')
   .action(async (url, options) => {
     try {
       console.log(chalk.bold.blue('\nUniversal Downloader\n'))
-      
-      // Determine mode: audio by default, video if -v flag is used
-      const argv = process.argv;
-      const hasVideoFlag = argv.includes('-v') || argv.includes('--video');
-      const hasAudioFlag = argv.includes('-a') || argv.includes('--audio');
-      
-      // Default is audio, unless video flag is explicitly specified
-      let audioOnly = true; // Default to audio
-      if (hasVideoFlag) {
-        audioOnly = false; // Explicit video mode
+
+      const nodeMajor = Number(process.versions.node.split('.')[0])
+      if (nodeMajor < YTDLP.MIN_NODE_MAJOR) {
+        logWarning(`Node.js ${YTDLP.MIN_NODE_MAJOR}+ is needed for YouTube (current: ${process.versions.node}).`)
       }
-      if (hasAudioFlag) {
-        audioOnly = true; // Explicit audio mode (redundant but clear)
-      }
-      
-      // Fix URL escaping - handle both URI encoding and shell escaping
-      let fixedUrl = url;
-      
-      // First handle shell escaping (backslashes before special characters)
-      fixedUrl = fixedUrl.replace(/\\([?&=])/g, '$1'); // Remove backslashes before ?, &, =
-      
-      // Then try URI decoding if needed
-      try {
-        const decoded = decodeURIComponent(fixedUrl);
-        // Only use decoded version if it looks like a valid URL
-        if (decoded.startsWith('http')) {
-          fixedUrl = decoded;
+
+      if (!url) {
+        if (options.update) {
+          process.exitCode = (await updateYtDlp()) ? UI_CONSTANTS.EXIT_CODE_SUCCESS : UI_CONSTANTS.EXIT_CODE_ERROR
+          return
         }
-      } catch {
-        // If decoding fails, keep the shell-unescaped version
+        program.help({ error: true })
       }
-      
-      // Use fixed URL instead of original
-      url = fixedUrl;
+
+      // Audio by default; -a wins if both -a and -v are given
+      const audioOnly = Boolean(options.audio) || !options.video
+
+      url = fixUrlEscaping(url)
 
       const validation = validateUrl(url)
-      if (!validation.isValid) {
-        logError(validation.error)
-        process.exit(UI_CONSTANTS.EXIT_CODE_ERROR)
-      }
+      if (!validation.isValid) fail(validation.error)
 
       if (!(await validateFormat(options.format))) {
-        logError(
-          `${ERROR_MESSAGES.INVALID_FORMAT} Supported formats: ${DEFAULT_CONFIG.SUPPORTED_FORMATS.join(', ')}`,
-        )
-        process.exit(UI_CONSTANTS.EXIT_CODE_ERROR)
+        fail(`${ERROR_MESSAGES.INVALID_FORMAT} Supported formats: ${DEFAULT_CONFIG.SUPPORTED_FORMATS.join(', ')}`)
       }
 
       if (audioOnly) {
         // Validate audio quality for audio extraction
         if (!(await validateAudioQuality(options.quality))) {
-          logError(
-            `${ERROR_MESSAGES.INVALID_AUDIO_QUALITY} Supported options: ${DEFAULT_CONFIG.AUDIO_QUALITY_OPTIONS.join(', ')}`,
-          )
-          process.exit(UI_CONSTANTS.EXIT_CODE_ERROR)
+          fail(`${ERROR_MESSAGES.INVALID_AUDIO_QUALITY} Supported options: ${DEFAULT_CONFIG.AUDIO_QUALITY_OPTIONS.join(', ')}`)
         }
-      } else {
-        // Validate video quality for video download
-        if (!(await validateVideoQuality(options.quality))) {
-          logError(
-            `${ERROR_MESSAGES.INVALID_VIDEO_QUALITY} Supported options: ${DEFAULT_CONFIG.VIDEO_QUALITY_OPTIONS.join(', ')}`,
-          )
-          process.exit(UI_CONSTANTS.EXIT_CODE_ERROR)
-        }
+      } else if (!(await validateVideoQuality(options.quality))) {
+        fail(`${ERROR_MESSAGES.INVALID_VIDEO_QUALITY} Supported options: ${DEFAULT_CONFIG.VIDEO_QUALITY_OPTIONS.join(', ')}`)
       }
 
       if (!(await validateBrowser(options.browser))) {
-        logError(
-          `${ERROR_MESSAGES.INVALID_BROWSER} Supported browsers: ${DEFAULT_CONFIG.SUPPORTED_BROWSERS.join(', ')}`,
-        )
-        process.exit(UI_CONSTANTS.EXIT_CODE_ERROR)
+        fail(`${ERROR_MESSAGES.INVALID_BROWSER} Supported browsers: ${DEFAULT_CONFIG.SUPPORTED_BROWSERS.join(', ')}`)
       }
 
-      if (options.info) {
-        logInfo('Getting video information...')
-        const videoInfo = await getVideoInfo(url)
-        if (videoInfo) {
-          console.log(chalk.cyan('\n📹 Video Information:'))
-          console.log(chalk.white(`Title: ${videoInfo.title}`))
-          console.log(chalk.white(`Author: ${videoInfo.uploader}`))
-          if (videoInfo.duration) {
-            const minutes = Math.floor(
-              videoInfo.duration / UI_CONSTANTS.SECONDS_IN_MINUTE,
-            )
-            const seconds = videoInfo.duration % UI_CONSTANTS.SECONDS_IN_MINUTE
-            console.log(
-              chalk.white(
-                `Duration: ${minutes}:${seconds.toString().padStart(UI_CONSTANTS.TIME_PAD_LENGTH, '0')}`,
-              ),
-            )
-          }
-          console.log('')
+      if (options.cookies) {
+        try {
+          await fs.access(options.cookies)
+        } catch {
+          fail(`${ERROR_MESSAGES.COOKIES_FILE_NOT_FOUND} ${options.cookies}`)
         }
       }
 
-      const downloadOptions = {
+      const result = await downloadVideo(url, {
         outputDir: options.output,
         format: options.format.toLowerCase(),
         quality: options.quality.toLowerCase(),
         browser: options.browser,
         cookiesFile: options.cookies,
         verbose: options.verbose,
-        audioOnly: audioOnly,
-      }
-      
-      // Debug logging only in verbose mode
-      if (options.verbose) {
-        console.log('🔍 CLI Debug:', { 
-          hasVideoFlag,
-          hasAudioFlag,
-          audioOnly,
-          quality: options.quality,
-          url: url
-        });
-      }
+        audioOnly,
+        showInfo: options.info,
+        forceUpdate: options.update,
+      })
 
-      const result = await downloadVideo(url, downloadOptions)
-
-      if (result.success) {
-        // console.log(chalk.green.bold('\n✅ Download completed successfully!\n'));
-      } else {
-        process.exit(UI_CONSTANTS.EXIT_CODE_ERROR)
-      }
+      process.exitCode = result.success ? UI_CONSTANTS.EXIT_CODE_SUCCESS : UI_CONSTANTS.EXIT_CODE_ERROR
     } catch (error) {
-      logError('Unexpected error:', error)
-      process.exit(1)
+      spinner.cleanup()
+      logError(`Unexpected error: ${error.message}`, error)
+      process.exitCode = UI_CONSTANTS.EXIT_CODE_ERROR
     }
   })
 
