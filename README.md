@@ -32,7 +32,7 @@ The first run downloads yt-dlp (about 50 MB, once) and takes about a minute; aft
 - 📚 **Playlists**: a playlist link saves every item into its own numbered subfolder
 - 📁 **Smart file organization**: `~/Downloads/Audio/{site}/` and `~/Downloads/Video/{site}/`
 - 🔄 **Keeps working**: udav installs yt-dlp itself and updates it daily; if YouTube changes something, it updates and retries
-- 🍪 **Cookies only when needed**: browser cookies are used only when YouTube asks to sign in
+- 🍪 **Cookies only when needed**: browser cookies are used only when YouTube asks to sign in; Safari cookies come through a tiny helper app, so the terminal needs no Full Disk Access
 - ⏯ **Resumable**: interrupted downloads (Ctrl+C, lost connection) continue from where they stopped
 
 ## Installation
@@ -168,12 +168,19 @@ udav --update
 
 ### YouTube "Sign in to confirm you're not a bot"
 
-udav first downloads without cookies. When YouTube asks to sign in, it retries with cookies from your browsers: Safari, Firefox, Chrome, Edge (installed ones only).
+YouTube asks some addresses to sign in, datacenter IPs (VPN servers) most often. udav first downloads without cookies; when YouTube asks, it retries with your YouTube cookies.
 
-1. **Sign in to YouTube** in one of these browsers and run udav again.
-2. **Chrome or Edge**: macOS asks for the keychain password so that yt-dlp can read the cookies. Choose "Always Allow".
-3. **Safari**: its cookies need Full Disk Access for your terminal app: System Settings → Privacy & Security → Full Disk Access → add Terminal, iTerm or Warp, then restart it.
-4. **On a VPN?** YouTube asks datacenter IP addresses to sign in more often: try another server.
+**Safari (macOS).** macOS opens Safari cookies only to apps with Full Disk Access. Given to the terminal, that access would open your mail, messages and the cookies of every site to every program you run there. So udav uses a tiny helper app, "udav Safari Cookies", and only the helper gets it.
+
+The first time YouTube asks to sign in, udav builds the helper from [`macos/safari-cookies`](macos/safari-cookies) (about 250 lines of Swift with comments) with Apple's compiler from the Command Line Tools, signs it, opens System Settings → Privacy & Security → Full Disk Access and shows the helper in Finder. Drag "udav Safari Cookies" into the list and turn it on (or click +, press ⇧⌘G and paste `~/Library/Application Support/udav`): udav notices and continues the download. This happens once, the helper is not rebuilt after that. If udav says Safari has no YouTube session, sign in to YouTube in Safari.
+
+When YouTube asks to sign in, udav starts the helper: it copies only the youtube.com cookies into `~/Library/Application Support/udav` (mode 600), and udav deletes the copy after the download. The helper takes no arguments, writes only into that folder, starts no other programs and is signed with the hardened runtime, so other programs cannot inject code into it. Any program running as you can still start it and get your YouTube cookies: the worst case is your YouTube session, not the whole disk.
+
+**Chrome, Edge, Firefox.** Since macOS 27, terminal apps without Full Disk Access cannot read their data at all, and udav says so instead of trying. Where yt-dlp can read Chrome or Edge, macOS asks for the keychain password: choose "Allow". "Always Allow" lets any program read those cookies without asking.
+
+**cookies.txt.** `-c cookies.txt` works with a file exported from any browser.
+
+**On a VPN?** Another server helps, if you have one.
 
 ### "YouTube changed something"
 
@@ -214,5 +221,6 @@ udav https://www.youtube.com/watch?v=dQw4w9WgXcQ&list=PL123     # fails in zsh
 
 - [yt-dlp](https://github.com/yt-dlp/yt-dlp) - the downloader itself (installed and updated by udav on macOS)
 - [FFmpeg](https://ffmpeg.org) - audio extraction, merging, tags and covers
+- Apple Command Line Tools (`xcode-select --install`) - only to build the Safari helper
 - [commander](https://www.npmjs.com/package/commander) - command-line argument parsing
 - [chalk](https://www.npmjs.com/package/chalk) - terminal colors

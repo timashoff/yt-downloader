@@ -14,6 +14,7 @@ import {
 } from './constants.js';
 import { isYouTubeUrl } from './validator.js';
 import { logError, logInfo, logSuccess, logWarning, redact } from './logger.js';
+import { prepareSafariCookies, removeSafariCookies, safariHelperUnavailable, safariHint } from './safari.js';
 import { spinner, truncateToWidth } from './spinner.js';
 import { findFfmpegDir, getYtDlp, runYtDlp } from './ytdlp.js';
 
@@ -242,31 +243,73 @@ async function exists(target) {
   }
 }
 
-async function findCookieBrowsers() {
+/**
+ * macOS: can this terminal read the browser's cookies? 'usable', 'blocked' (macOS privacy
+ * protection) or null (not installed, never used). Neither check ever shows a prompt.
+ * Safari cookies need Full Disk Access. Since macOS 27 the folders of Chrome, Edge and
+ * Firefox are closed too: their folder itself is visible, but listing it fails with EPERM,
+ * and yt-dlp then wrongly reports "could not find ... cookies database".
+ */
+async function browserAccess(browser) {
+  const { app, profile } = BROWSERS[browser];
+  if (app) {
+    const installed = (await exists(path.join('/Applications', app)))
+      || (await exists(path.join(HOME, 'Applications', app)));
+    if (!installed) return null;
+  }
+  try {
+    if (browser === 'safari') {
+      const handle = await fs.open(profile, 'r');
+      await handle.close();
+    } else {
+      await fs.readdir(profile);
+    }
+    return 'usable';
+  } catch (error) {
+    return error.code === 'EPERM' || error.code === 'EACCES' ? 'blocked' : null;
+  }
+}
+
+/** Browsers whose cookies yt-dlp can read directly, and those macOS keeps closed */
+async function findCookieBrowsers({ includeSafari }) {
   const usable = [];
-  let safariBlocked = false;
+  const blocked = [];
   for (const browser of DEFAULT_CONFIG.BROWSER_FALLBACK_ORDER) {
     if (process.platform !== 'darwin') {
       if (browser !== 'safari') usable.push(browser);
       continue;
     }
-    const { app, profile } = BROWSERS[browser];
-    if (browser === 'safari') {
-      try {
-        // Safari cookies are readable only with Full Disk Access; opening never prompts
-        const handle = await fs.open(profile, 'r');
-        await handle.close();
-        usable.push(browser);
-      } catch (error) {
-        if (error.code === 'EPERM' || error.code === 'EACCES') safariBlocked = true;
-      }
-      continue;
-    }
-    const installed = (await exists(path.join('/Applications', app)))
-      || (await exists(path.join(HOME, 'Applications', app)));
-    if (installed && (await exists(profile))) usable.push(browser);
+    if (browser === 'safari' && !includeSafari) continue;
+    const access = await browserAccess(browser);
+    if (access === 'usable') usable.push(browser);
+    // Closed Safari has its own hint: the helper app
+    else if (access === 'blocked' && browser !== 'safari') blocked.push(browser);
   }
-  return { usable, safariBlocked };
+  return { usable, blocked };
+}
+
+/** -b <browser>: the cookie source, or null when the browser is out of reach (reason printed) */
+async function explicitBrowserSource(browser, youtube) {
+  if (process.platform !== 'darwin') return { type: 'browser', value: browser, browser };
+  // The terminal itself can read the browser (for Safari: it has Full Disk Access)
+  const access = await browserAccess(browser);
+  if (browser === 'safari' && youtube) {
+    // The helper app (built and allowed on first use) copies only the youtube.com cookies
+    const safari = await prepareSafariCookies();
+    if (safari.status === 'ok') return { type: 'file', value: safari.file, browser };
+    if (safariHelperUnavailable(safari) && access === 'usable') return { type: 'browser', value: browser, browser };
+    logError('udav cannot read Safari cookies.');
+    logInfo(`💡 ${(safariHint(safari) || ['Pass a cookies.txt file instead: -c <file>.']).join(' ')}`);
+    return null;
+  }
+  if (access === 'blocked') {
+    logError(`macOS does not let ${terminalName()} read ${browserName(browser)} cookies.`);
+    logInfo(youtube
+      ? '💡 Leave out -b: for YouTube udav takes the cookies from Safari itself. Or pass a cookies.txt file: -c <file>.'
+      : '💡 Export the cookies of this site into a cookies.txt file and pass it with -c <file>.');
+    return null;
+  }
+  return { type: 'browser', value: browser, browser };
 }
 
 const num = (value) => (value === undefined || value === 'NA' || value === '' ? NaN : Number(value));
@@ -410,7 +453,7 @@ function reportSuccess(run, outputPath) {
   logSuccess(`${run.files.length} files${note} → ${tildify(folders.length === 1 ? folders[0] : outputPath)}`);
 }
 
-function reportFailure(kind, run, { safariBlocked, triedBrowsers, ytdlp }) {
+function reportFailure(kind, run, { blocked = [], triedBrowsers = [], safari = null, ytdlp }) {
   if (spinner.isRunning()) spinner.stop(false, 'Download failed');
   const reason = errorReason(run);
 
@@ -420,21 +463,30 @@ function reportFailure(kind, run, { safariBlocked, triedBrowsers, ytdlp }) {
     for (const { browser, reason: browserReason } of triedBrowsers) {
       logInfo(`   ${browserName(browser)} cookies did not help: ${browserReason}`);
     }
-    logInfo('💡 Solutions:');
-    logInfo('   1. Open YouTube in Safari, Chrome or Edge, sign in, then run udav again:');
-    logInfo('      it picks up the browser cookies automatically.');
-    if (safariBlocked) {
-      logInfo(`   2. For Safari cookies give ${terminalName()} Full Disk Access:`);
-      logInfo(`      System Settings → Privacy & Security → Full Disk Access → ${terminalName()}, then restart it.`);
+    if (blocked.length) {
+      logInfo(`   macOS does not let ${terminalName()} read ${blocked.map(browserName).join(', ')} cookies.`);
     }
-    logInfo('   3. On a VPN? YouTube asks datacenter IPs to sign in more often: try another server.');
+    // Each solution: its lines, the first one gets the number
+    const solutions = [];
+    const tried = triedBrowsers.map(({ browser }) => browserName(browser));
+    const safariSolution = tried.includes('Safari') ? null : safariHint(safari);
+    if (safariSolution) solutions.push(safariSolution);
+    if (tried.length) {
+      solutions.push([`Open YouTube in ${tried.join(', ')}: if it asks to sign in there too, sign in, then run udav again.`]);
+    } else if (!safariSolution) {
+      solutions.push(['Sign in to YouTube in your browser, then run udav again.']);
+    }
+    solutions.push(['On a VPN? YouTube asks datacenter IPs to sign in more often: try another server.']);
+    logInfo('💡 Solutions:');
+    solutions.forEach((lines, index) => lines.forEach((line, row) => {
+      logInfo(row ? `      ${line}` : `   ${index + 1}. ${line}`);
+    }));
     return;
   }
 
   if (kind === 'safariAccess') {
     logError(`macOS does not let ${terminalName()} read Safari cookies.`);
-    logInfo(`💡 System Settings → Privacy & Security → Full Disk Access → turn on ${terminalName()}, then restart it.`);
-    logInfo('   Or use another browser: -b chrome (macOS will ask for the keychain password once).');
+    logInfo('💡 Leave out -b: for YouTube udav reads Safari through its own small helper app.');
     return;
   }
 
@@ -511,73 +563,92 @@ export async function downloadVideo(url, options = {}) {
   const site = youtube ? 'YouTube' : extractDomain(url);
   const settings = { audioOnly, format, quality, outputPath, ffmpegDir, verbose, showInfo };
 
-  // Cookies: only what the user asked for. Otherwise none, and browser cookies are tried
-  // only when YouTube asks to sign in (no keychain prompts, no account risk for normal videos).
-  const sources = cookiesFile ? [{ type: 'file', value: cookiesFile }]
-    : browser ? [{ type: 'browser', value: browser.toLowerCase() }]
-      : [{ type: 'none' }];
+  // Cookies: only what the user asked for. Otherwise none, and cookies are tried only when
+  // YouTube asks to sign in (no keychain prompts, no account risk for normal videos).
+  let sources = [{ type: 'none' }];
+  if (cookiesFile) {
+    sources = [{ type: 'file', value: cookiesFile }];
+  } else if (browser) {
+    const source = await explicitBrowserSource(browser.toLowerCase(), youtube);
+    if (!source) return { success: false };
+    sources = [source];
+  }
   const autoCookies = youtube && !cookiesFile && !browser;
   const triedBrowsers = [];
-  let safariBlocked = false;
-  let signInRun = null; // the first "please sign in" answer, reported if no browser helps
+  let blocked = [];
+  let safari = null;
+  let signInRun = null; // the first "please sign in" answer, reported if no cookies help
   let updateTried = ytdlp.changed;
 
-  for (let i = 0; i < sources.length; i++) {
-    const source = sources[i];
-    const initialMessage = source.type === 'browser'
-      ? `Using ${browserName(source.value)} cookies...`
-      : `Connecting to ${site}...`;
-    const run = await runAttempt(ytdlp, url, { ...settings, cookieSource: source }, initialMessage);
+  try {
+    for (let i = 0; i < sources.length; i++) {
+      const source = sources[i];
+      const initialMessage = source.browser
+        ? `Using ${browserName(source.browser)} cookies...`
+        : `Connecting to ${site}...`;
+      const run = await runAttempt(ytdlp, url, { ...settings, cookieSource: source }, initialMessage);
 
-    if (run.ok) {
-      reportSuccess(run, outputPath);
-      return { success: true, outputPath, files: run.files };
-    }
-    if (run.files.length > 0) {
-      // Playlist: some items saved, some failed (private, deleted...)
-      if (spinner.isRunning()) spinner.cleanup();
-      logWarning(`${run.files.length} file(s) saved, but some items failed: ${errorReason(run)}`);
-      return { success: false, outputPath, files: run.files };
-    }
-
-    const kind = classifyError(run);
-
-    if (kind === 'auth' && autoCookies && !signInRun) {
-      signInRun = run;
-      const browsers = await findCookieBrowsers();
-      safariBlocked = browsers.safariBlocked;
-      sources.push(...browsers.usable.map((value) => ({ type: 'browser', value, auto: true })));
-      if (spinner.isRunning()) spinner.stop(false, 'YouTube asks to sign in');
-      if (browsers.usable.length === 0) {
-        reportFailure('auth', run, { safariBlocked, triedBrowsers, ytdlp });
-        return { success: false, error: errorReason(run) };
+      if (run.ok) {
+        reportSuccess(run, outputPath);
+        return { success: true, outputPath, files: run.files };
       }
-      if (browsers.usable.some((value) => value === 'chrome' || value === 'edge')) {
-        logInfo('Retrying with browser cookies. macOS may ask for the keychain password');
-        logInfo('to let yt-dlp read Chrome/Edge cookies: choose "Always Allow".');
+      if (run.files.length > 0) {
+        // Playlist: some items saved, some failed (private, deleted...)
+        if (spinner.isRunning()) spinner.cleanup();
+        logWarning(`${run.files.length} file(s) saved, but some items failed: ${errorReason(run)}`);
+        return { success: false, outputPath, files: run.files };
       }
-      continue;
-    }
-    if (source.auto) {
-      triedBrowsers.push({ browser: source.value, reason: errorReason(run) });
-      if (spinner.isRunning()) spinner.stop(false, `${browserName(source.value)} cookies did not help`);
-      if (i < sources.length - 1) continue;
-      reportFailure('auth', signInRun, { safariBlocked, triedBrowsers, ytdlp });
-      return { success: false, error: errorReason(signInRun) };
-    }
-    if (kind === 'outdated' && ytdlp.managed && !updateTried) {
-      updateTried = true;
-      if (spinner.isRunning()) spinner.stop(false, 'Download failed, checking for a newer yt-dlp');
-      const fresh = await getYtDlp({ forceUpdate: true }).catch(() => null);
-      if (fresh && fresh.version !== ytdlp.version) {
-        ytdlp = fresh;
-        i--; // same attempt again with the new yt-dlp
+
+      const kind = classifyError(run);
+
+      if (kind === 'auth' && autoCookies && !signInRun) {
+        signInRun = run;
+        if (spinner.isRunning()) spinner.stop(false, 'YouTube asks to sign in');
+        const darwin = process.platform === 'darwin';
+        if (darwin) {
+          // Safari goes through the helper app: the terminal itself gets no Full Disk Access.
+          // The first time, udav builds the helper and waits until macOS allows it.
+          safari = await prepareSafariCookies();
+          if (safari.status === 'ok') sources.push({ type: 'file', value: safari.file, auto: true, browser: 'safari' });
+        }
+        const browsers = await findCookieBrowsers({ includeSafari: darwin && safariHelperUnavailable(safari) });
+        blocked = browsers.blocked;
+        sources.push(...browsers.usable.map((value) => ({ type: 'browser', value, auto: true, browser: value })));
+        if (i === sources.length - 1) {
+          reportFailure('auth', run, { blocked, triedBrowsers, safari, ytdlp });
+          return { success: false, error: errorReason(run) };
+        }
+        if (browsers.usable.some((value) => value === 'chrome' || value === 'edge')) {
+          logInfo('Retrying with browser cookies. macOS may ask for the keychain password so that yt-dlp');
+          logInfo('can read Chrome/Edge cookies: choose "Allow". "Always Allow" opens them to any program.');
+        }
         continue;
       }
-    }
+      if (source.auto) {
+        triedBrowsers.push({ browser: source.browser, reason: errorReason(run) });
+        if (spinner.isRunning()) spinner.stop(false, `${browserName(source.browser)} cookies did not help`);
+        if (i < sources.length - 1) continue;
+        reportFailure('auth', signInRun, { blocked, triedBrowsers, safari, ytdlp });
+        return { success: false, error: errorReason(signInRun) };
+      }
+      if (kind === 'outdated' && ytdlp.managed && !updateTried) {
+        updateTried = true;
+        if (spinner.isRunning()) spinner.stop(false, 'Download failed, checking for a newer yt-dlp');
+        const fresh = await getYtDlp({ forceUpdate: true }).catch(() => null);
+        if (fresh && fresh.version !== ytdlp.version) {
+          ytdlp = fresh;
+          i--; // same attempt again with the new yt-dlp
+          continue;
+        }
+      }
 
-    reportFailure(kind, run, { safariBlocked, triedBrowsers, ytdlp });
-    return { success: false, error: errorReason(run) };
+      if (kind === 'auth' && source.browser) triedBrowsers.push({ browser: source.browser, reason: errorReason(run) });
+      reportFailure(kind, run, { blocked, triedBrowsers, safari, ytdlp });
+      return { success: false, error: errorReason(run) };
+    }
+    return { success: false };
+  } finally {
+    // The copy of the YouTube cookies from Safari lives only for this download
+    if (process.platform === 'darwin') await removeSafariCookies();
   }
-  return { success: false };
 }

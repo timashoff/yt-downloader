@@ -16,7 +16,7 @@ const execFileAsync = promisify(execFile);
 
 // udav keeps its own yt-dlp here (macOS only), independent of the project folder,
 // so re-cloning or reinstalling udav does not trigger a new 50 MB download.
-const DATA_DIR = path.join(os.homedir(), 'Library', 'Application Support', 'udav');
+export const DATA_DIR = path.join(os.homedir(), 'Library', 'Application Support', 'udav');
 const VERSIONS_DIR = path.join(DATA_DIR, 'yt-dlp');
 const STATE_FILE = path.join(DATA_DIR, 'state.json');
 

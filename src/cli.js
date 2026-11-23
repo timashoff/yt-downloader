@@ -14,6 +14,7 @@ import {
 import { downloadVideo, updateYtDlp } from './downloader.js'
 import { DEFAULT_CONFIG, ERROR_MESSAGES, UI_CONSTANTS, YTDLP } from './constants.js'
 import { logError, logWarning } from './logger.js'
+import { removeSafariCookiesSync } from './safari.js'
 import { spinner } from './spinner.js'
 
 const { version } = createRequire(import.meta.url)('../package.json')
@@ -22,6 +23,7 @@ const { version } = createRequire(import.meta.url)('../package.json')
 // file, so running the same command again resumes the download.
 process.on('SIGINT', () => {
   spinner.cleanup()
+  removeSafariCookiesSync()
   console.log(chalk.yellow('\nCancelled. Run the same command again to resume.'))
   process.exit(UI_CONSTANTS.EXIT_CODE_INTERRUPTED)
 })

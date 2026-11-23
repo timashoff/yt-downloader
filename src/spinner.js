@@ -2,7 +2,7 @@ import chalk from 'chalk';
 import { UI_SYMBOLS, SPINNER_CONSTANTS } from './constants.js';
 
 // No animation and no cursor codes when the output goes to a file or a pipe
-const isInteractive = () => Boolean(process.stdout.isTTY);
+export const isInteractive = () => Boolean(process.stdout.isTTY);
 
 /**
  * Clear the current terminal line
